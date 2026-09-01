@@ -1,0 +1,15 @@
+/** 解決エンジンの公開API。 */
+export * from './errors';
+export * from './state';
+export * from './chooser';
+export * from './pool';
+export * from './context';
+export { evalValue } from './value';
+export { evalCondition } from './condition';
+export * from './select';
+export * from './continuous';
+export { dealDamage, changeLife, type DamageSpec, type DamageResult } from './damage';
+export { emit, drainTriggers, limitAvailable, consumeLimit } from './events';
+export { resolve, resolveTop, resolveStackItem, pushPayload, type EffectResult } from './effects';
+export * from './objectives';
+export * from './flow';

@@ -1,0 +1,16 @@
+{
+  "name": "cardgame-rules",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test src/engine/*.test.ts",
+    "sweep": "node --import tsx tools/sweep.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^26.4.0",
+    "tsx": "^4.23.13",
+    "typescript": "^5.9.3"
+  }
+}
