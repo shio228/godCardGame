@@ -95,10 +95,16 @@ export async function resolveSpecies(ref: SpeciesRef, ctx: Ctx): Promise<Species
       const who = await resolvePlayerOne(chooser, ctx);
       let candidates = speciesUniverse(ctx, who);
       if (ref.t === 'choose') {
-        if (ref.onlyExisting) candidates = candidates.filter((sp) => (state(ctx).players[who].minions[sp] ?? 0) > 0);
         if (ref.exclude) {
           const ex = await resolveSpecies(ref.exclude, ctx);
           candidates = candidates.filter((sp) => sp !== ex);
+        }
+        if (ref.onlyExisting) {
+          const existing = candidates.filter((sp) => (state(ctx).players[who].minions[sp] ?? 0) > 0);
+          // 1体も持っていないなら絞り込みを外す。
+          // 「0体での攻撃指令」は合法で、x が 0 になるだけ（ダメージイベントは出る）。
+          // ここで例外にすると、ミニオンを失った状態の攻撃指令でゲームが止まってしまう。
+          if (existing.length > 0) candidates = existing;
         }
       }
       if (candidates.length === 0) throw new RuleError('選べる種族がない');

@@ -17,9 +17,13 @@ async function main() {
     const [c] = putInHand(engine, 'P1', [card.id]);
     try {
       const item = await play(engine, 'P1', c!);
-      for (const ab of card.abilities) {
-        if (ab.kind === 'onResolve') {
-          await resolveTop(ab.effect, { engine, self: 'P1', item, stackId: item.stackId, vars: new Scope() });
+      // 瞬発は play() の中で解決済みなので、まだスタックに残っているものだけ手で叩く
+      const stillOnStack = engine.state.stacks.some((st) => st.items.some((it) => it.uid === item.uid));
+      if (stillOnStack) {
+        for (const ab of card.abilities) {
+          if (ab.kind === 'onResolve') {
+            await resolveTop(ab.effect, { engine, self: 'P1', item, stackId: item.stackId, vars: new Scope() });
+          }
         }
       }
       ok++;

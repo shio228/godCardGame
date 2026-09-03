@@ -5,8 +5,13 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test src/engine/*.test.ts",
-    "sweep": "node --import tsx tools/sweep.ts"
+    "test": "node --import tsx --test src/**/*.test.ts tools/**/*.test.ts",
+    "sweep": "node --import tsx tools/sweep.ts",
+    "simulate": "node --import tsx tools/simulate.ts",
+    "replay": "node --import tsx tools/replay.ts",
+    "dashboard": "node --import tsx tools/dashboard.ts",
+    "deck": "node --import tsx tools/deck.ts",
+    "play": "node --import tsx tools/play.ts"
   },
   "devDependencies": {
     "@types/node": "^26.4.0",

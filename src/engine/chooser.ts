@@ -97,6 +97,81 @@ export class AutoChooser implements Chooser {
   }
 }
 
+/**
+ * 一様ランダムに選ぶ Chooser。自動対戦（`tools/simulate.ts`）の対局者。
+ *
+ * `AutoChooser` は「常に先頭を選び、任意効果を必ず受ける」ので、
+ * 手札を必ず出し切る・パスを一度もしない偏った打ち手になる。
+ * バランスの数字を取るにはランダムに散らす必要があるためこちらを使う。
+ * 乱数は自前の LCG で、シードを与えれば再現できる。
+ */
+export class RandomChooser implements Chooser {
+  private seed: number;
+
+  constructor(seed = 1) {
+    this.seed = seed >>> 0;
+  }
+
+  /** [0, max) の整数 */
+  private int(max: number): number {
+    this.seed = (this.seed * 1664525 + 1013904223) >>> 0;
+    return max <= 0 ? 0 : this.seed % max;
+  }
+
+  async select<T>(req: SelectRequest<T>): Promise<T[]> {
+    const max = Math.min(req.max, req.options.length);
+    const min = Math.min(req.min, max);
+    const n = min + this.int(max - min + 1);
+    const pool = [...req.options];
+    const out: T[] = [];
+    for (let k = 0; k < n && pool.length > 0; k++) {
+      out.push(pool.splice(this.int(pool.length), 1)[0]!.value);
+    }
+    return out;
+  }
+
+  async number(req: NumberRequest): Promise<number> {
+    const lo = req.min;
+    const hi = Math.max(lo, req.max);
+    return lo + this.int(hi - lo + 1);
+  }
+
+  async confirm(_req: ConfirmRequest): Promise<boolean> {
+    return this.int(2) === 0;
+  }
+
+  async order<T>(req: OrderRequest<T>): Promise<T[]> {
+    const pool = [...req.options];
+    const out: T[] = [];
+    while (pool.length > 0) out.push(pool.splice(this.int(pool.length), 1)[0]!.value);
+    return out;
+  }
+}
+
+/**
+ * プレイヤーごとに別の打ち手を割り当てる。
+ * AI同士の比較（貪欲 vs ランダム）と、将来の「人間 vs AI」の両方でここを通る。
+ */
+export class PerPlayerChooser implements Chooser {
+  constructor(private readonly by: Record<PlayerId, Chooser>) {}
+
+  select<T>(req: SelectRequest<T>): Promise<T[]> {
+    return this.by[req.player].select(req);
+  }
+
+  number(req: NumberRequest): Promise<number> {
+    return this.by[req.player].number(req);
+  }
+
+  confirm(req: ConfirmRequest): Promise<boolean> {
+    return this.by[req.player].confirm(req);
+  }
+
+  order<T>(req: OrderRequest<T>): Promise<T[]> {
+    return this.by[req.player].order(req);
+  }
+}
+
 /** テスト用のスクリプト済み応答。1件ずつ消費し、尽きたら fallback に委譲する。 */
 export type ScriptedAnswer =
   /** select: 選ぶ選択肢のインデックス配列 */

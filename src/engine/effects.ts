@@ -23,6 +23,7 @@ import type {
 import {
   Scope,
   childScope,
+  logAction,
   logLine,
   lookupOpt,
   pool,
@@ -31,7 +32,7 @@ import {
   type Ctx,
 } from './context';
 import { evalCondition } from './condition';
-import { consumeWeatherPrevention } from './continuous';
+import { assertReplaceSupported, consumeWeatherPrevention } from './continuous';
 import { changeLife, dealDamage } from './damage';
 import { BindingError, LoopError, NotImplementedError, RuleError, unreachable } from './errors';
 import { drainTriggers, emit } from './events';
@@ -52,6 +53,7 @@ import {
   flipWeather,
   nextUid,
   opponentOf,
+  setWinner,
   rngInt,
   shufflePile,
   stackOf,
@@ -465,6 +467,10 @@ export async function resolve(e: Effect, ctx: Ctx): Promise<EffectResult> {
       const made: TokenInstance[] = [];
       for (let k = 0; k < count; k++) {
         const defId = await resolveTokenRef(e.token, ctx, owner);
+        if (defId === undefined) {
+          logLine(ctx, '生成できるトークンが残っていない');
+          break;
+        }
         const tk: TokenInstance = {
           uid: nextUid(s, 'TK'),
           defId,
@@ -595,20 +601,21 @@ export async function resolve(e: Effect, ctx: Ctx): Promise<EffectResult> {
       await emit(ctx, {
         kind: 'weatherChanged',
         player: ctx.self,
-        bindings: { from: { of: 'number', value: 0 }, to: { of: 'number', value: 0 } },
+        bindings: { from: { of: 'weather', value: from }, to: { of: 'weather', value: next } },
       });
       logLine(ctx, `天候: ${from} → ${next}`);
       return EMPTY;
     }
 
     case 'grantContinuous': {
+      assertReplaceSupported(e.mod);
       const owner = e.to ? await resolvePlayerOne(e.to, ctx) : ctx.self;
       s.continuous.push({
         id: nextUid(s, 'CM'),
         mod: e.mod,
         duration: e.duration,
         controller: owner,
-        ...(ctx.item ? { sourceUid: ctx.item.uid } : {}),
+        ...(ctx.item ? { sourceUid: ctx.item.uid, snapshots: { ...ctx.item.snapshots } } : {}),
         ...(e.cond ? { cond: e.cond } : {}),
         ...(e.onceOnly ? { onceOnly: true } : {}),
       });
@@ -622,7 +629,7 @@ export async function resolve(e: Effect, ctx: Ctx): Promise<EffectResult> {
         trigger: e.trigger,
         duration: e.duration,
         controller: owner,
-        ...(ctx.item ? { sourceUid: ctx.item.uid } : {}),
+        ...(ctx.item ? { sourceUid: ctx.item.uid, snapshots: { ...ctx.item.snapshots } } : {}),
         ...(e.onceOnly ? { onceOnly: true } : {}),
       });
       return EMPTY;
@@ -652,14 +659,14 @@ export async function resolve(e: Effect, ctx: Ctx): Promise<EffectResult> {
 
     case 'win': {
       const p = await resolvePlayerOne(e.player, ctx);
-      s.winner = p;
+      setWinner(s, p, '効果');
       logLine(ctx, `${p} の勝利`);
       return EMPTY;
     }
 
     case 'lose': {
       const p = await resolvePlayerOne(e.player, ctx);
-      s.winner = opponentOf(p);
+      setWinner(s, opponentOf(p), '効果');
       return EMPTY;
     }
 
@@ -860,14 +867,18 @@ async function resolveActionRef(ref: ActionRef, ctx: Ctx, exclude?: string[]): P
   return id;
 }
 
-async function resolveTokenRef(ref: TokenRef, ctx: Ctx, owner: string): Promise<string> {
+/**
+ * 生成するトークンの定義IDを1つ決める。
+ * **候補が1つも無ければ `undefined`**（「まだ装備していない武器」を全部装備済みのときなど）。
+ * 対象が無いだけで、未対応ではないので例外にはしない — `CardSel` の choose が
+ * 候補0で空集合を返すのと同じ扱い。
+ */
+async function resolveTokenRef(ref: TokenRef, ctx: Ctx, owner: string): Promise<string | undefined> {
   if (typeof ref === 'string') return ref;
   if (ref.t === 'var') {
     const b = lookupOpt(ctx, ref.name);
     if (!b || b.of !== 'token') throw new BindingError(`トークンの束縛 "${ref.name}" が見つからない`);
-    const first = b.value[0];
-    if (!first) throw new RuleError('トークンの束縛が空');
-    return first.defId;
+    return b.value[0]?.defId;
   }
   const god = pool(ctx).god(state(ctx).players[owner as 'P1' | 'P2'].god);
   let ids = god?.tokens ?? [...pool(ctx).tokens.keys()];
@@ -880,7 +891,7 @@ async function resolveTokenRef(ref: TokenRef, ctx: Ctx, owner: string): Promise<
     const owned = state(ctx).players[owner as 'P1' | 'P2'].tokens.filter((t) => t.equipped).map((t) => t.defId);
     ids = ids.filter((id) => !owned.includes(id));
   }
-  if (ids.length === 0) throw new RuleError('生成できるトークンがない');
+  if (ids.length === 0) return undefined;
   if (ids.length === 1) return ids[0]!;
   const who = ref.chooser ? await resolvePlayerOne(ref.chooser, ctx) : ctx.self;
   const picked = await ctx.engine.chooser.select<string>({
@@ -923,7 +934,7 @@ export function moveCardTo(ctx: Ctx, c: CardInstance, dest: Pile, position: 'top
  * 山札が足りない場合は引き切りペナルティ（不足1枚につき「30点のダメージを受ける」）を
  * スタックに積む — 対象に取れる効果として扱うため、直接ダメージにはしない。
  */
-async function drawCards(
+export async function drawCards(
   ctx: Ctx,
   player: 'P1' | 'P2',
   count: number,
@@ -940,7 +951,21 @@ async function drawCards(
   n = Math.max(0, n);
 
   const zone = from?.zone ?? 'deck';
-  const pile = s.players[player].zones[zone][0]!;
+  // 「カードを引く際、任意のあなたのデッキを選べる」（並列思考）。
+  // 山が分かれているときだけ選択が起きる
+  const piles = s.players[player].zones[zone];
+  let pile = piles[0]!;
+  if (piles.length > 1) {
+    const [picked] = await ctx.engine.chooser.select<number>({
+      kind: 'pile',
+      player,
+      prompt: 'どの山から引くか選ぶ',
+      options: piles.map((p, i) => ({ value: i, label: `山${i + 1}（${p.length}枚）` })),
+      min: 1,
+      max: 1,
+    });
+    pile = piles[picked ?? 0] ?? pile;
+  }
   const taken: CardInstance[] = [];
   for (let k = 0; k < n; k++) {
     const c = pile.pop();
@@ -1090,8 +1115,15 @@ async function resolveStackItemInner(ctx: Ctx, it: StackItem, keepOnStack: boole
     vars: new Scope(),
   };
 
+  logAction(ctx.engine, 'resolve', `解決: ${itemName(ctx, it)}`, it.controller);
   await emit(sub, { kind: 'resolving', itemUid: it.uid, player: it.controller });
+  // 「解決しようとするたび」の誘発は**解決の中身より先に**処理する。
+  // 炎天・燃え盛る大地のダメージがここで飛ぶ（FAQ の確定事項:
+  // 「スタック解決始め（炎天ダメージ判定）→ 解決中 → 解決終わり」）。
+  await drainTriggers(ctx.engine);
   if (s.winner) return;
+  // その誘発で打ち消された / 場所を移された項目は解決しない
+  if (!keepOnStack && !s.stacks.some((st) => st.items.some((x) => x.uid === it.uid))) return;
 
   if (it.kind === 'card' && it.card) {
     const def = pool(ctx).card(it.card.defId);

@@ -250,6 +250,8 @@ describe('海', () => {
     await startCycle(engine);
 
     // 詠唱を持つカードを1枚スタックに乗せ（初期値1）、カウンターを積み上げる
+    // （ドローフェイズを飛ばしているので、スタックフェイズに入った状態を直接作る）
+    engine.state.phase = 'stack';
     const { play, putInHand } = await import('./flow');
     const [c] = putInHand(engine, 'P1', ['sea/domain_expansion']);
     const item = await play(engine, 'P1', c!);

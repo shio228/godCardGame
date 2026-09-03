@@ -1,0 +1,32 @@
+# 依存関係・ビルド成果物
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+
+# Claude Code
+# CLAUDE.md / .claude/settings.json / rules / skills はコミットする（プロジェクトの資産）
+# 除外するのは個人設定のみ。Claude Code が自動で登録することもある
+.claude/settings.local.json
+
+# 秘密情報（.mcp.json は ${VAR} 参照のみなのでコミット可）
+.env
+.env.*
+!.env.example
+*service-account*.json
+*credentials*.json
+*token*.json
+.mcp.json
+
+# エディタ・OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ログ・一時ファイル
+*.log
+npm-debug.log*
+.npm/
+tmp/

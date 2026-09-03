@@ -10,13 +10,14 @@
  *   ③ 同一プレイヤー内に複数あるときはコントローラーが順序を選ぶ
  */
 import type { Ability, Effect, Limit, PlayerId, TriggerEvent } from '../rules/types';
-import { Scope, withBindings, type Ctx, type Engine, type PendingTrigger } from './context';
+import { Scope, logAction, withBindings, type Ctx, type Engine, type PendingTrigger } from './context';
 import { evalCondition } from './condition';
 import { LoopError } from './errors';
 import { matchStack, resolvePlayers, resolveStack, matchSpecies, resolveEntities, itemName } from './select';
 // objectives.ts とは相互参照になるが、どちらも関数宣言のみを使うため ESM の巻き上げで解決される。
 import { checkObjectives, objectiveTriggers } from './objectives';
 import { opponentOf, sameEntity, type Bound, type GameEvent, type StackItem } from './state';
+import { weatherTriggerSources } from './weather';
 
 export type EmitSpec = Omit<GameEvent, 'seq' | 'cycle' | 'turn' | 'weather'>;
 
@@ -49,6 +50,8 @@ interface TriggerSource {
   key: string;
   /** thresholds の糖衣展開: カウンタが増えて到達したときだけ発火する */
   requireIncrease?: boolean;
+  /** 付与時に写し取った発生源の snapshot。イベント由来の暗黙束縛に混ぜて渡す */
+  extraBindings?: Record<string, Bound>;
 }
 
 function fromAbilities(
@@ -158,6 +161,7 @@ function gatherSources(engine: Engine): TriggerSource[] {
     };
     if (g.trigger.optional !== undefined) src.optional = g.trigger.optional;
     if (g.trigger.limit !== undefined) src.limit = g.trigger.limit;
+    if (g.snapshots) src.extraBindings = g.snapshots;
     if (g.sourceUid) {
       for (const st of s.stacks) {
         const it = st.items.find((x) => x.uid === g.sourceUid);
@@ -253,9 +257,31 @@ function dyingMinionSources(engine: Engine, ev: GameEvent): TriggerSource[] {
   return fromAbilities(def.abilities, 'inField', ev.player, `ミニオン:${def.name}`, `minion:${ev.player}:${ev.species}`);
 }
 
+/**
+ * ⑥ 天候（と終末）が起こす処理。プレイヤーごとに1組ずつ有効になる。
+ * `weatherImmune` を持つプレイヤーの分は `weatherTriggerSources` が落としている。
+ */
+async function weatherSources(engine: Engine): Promise<TriggerSource[]> {
+  const out: TriggerSource[] = [];
+  for (const w of await weatherTriggerSources(engine)) {
+    const src: TriggerSource = {
+      when: w.trigger.when,
+      effect: w.trigger.effect,
+      controller: w.controller,
+      origin: w.origin,
+      key: w.key,
+    };
+    if (w.trigger.optional !== undefined) src.optional = w.trigger.optional;
+    if (w.trigger.limit !== undefined) src.limit = w.trigger.limit;
+    out.push(src);
+  }
+  return out;
+}
+
 async function collectTriggers(engine: Engine, ev: GameEvent): Promise<PendingTrigger[]> {
   const out: PendingTrigger[] = [];
-  for (const src of [...gatherSources(engine), ...dyingMinionSources(engine, ev)]) {
+  const sources = [...gatherSources(engine), ...dyingMinionSources(engine, ev), ...(await weatherSources(engine))];
+  for (const src of sources) {
     const kinds = Array.isArray(src.when.on) ? src.when.on : [src.when.on];
     if (!kinds.includes(ev.kind)) continue;
     if (src.requireIncrease) {
@@ -269,7 +295,8 @@ async function collectTriggers(engine: Engine, ev: GameEvent): Promise<PendingTr
     }
     if (!(await subjectMatches(engine, src, ev))) continue;
 
-    const bindings: Record<string, Bound> = { ...(ev.bindings ?? {}) };
+    // 付与元の snapshot を先に置き、イベント由来の暗黙束縛（count / source …）で上書きする
+    const bindings: Record<string, Bound> = { ...(src.extraBindings ?? {}), ...(ev.bindings ?? {}) };
     if (ev.itemUid && !bindings.source) {
       const it = findItemByUid(engine, ev.itemUid);
       if (it) bindings.source = { of: 'stack', value: [it] };
@@ -368,8 +395,11 @@ export async function drainTriggers(engine: Engine): Promise<void> {
         if (!limitAvailable(engine, pt.limitKey, pt.limit)) continue;
         consumeLimit(engine, pt.limitKey, pt.limit);
       }
-      engine.log.push({ depth: engine.depth, text: `誘発: ${pt.label}` });
+      logAction(engine, 'trigger', `誘発: ${pt.label}`, pt.controller);
       await resolve(pt.effect, withVars);
+      // 「効果で勝った」だけでは何が効いたか分からないので、誘発の名前に置き換える
+      // （誘発型の特殊勝利条件はここを通る）
+      if (engine.state.winReason === '効果') engine.state.winReason = pt.label;
     }
   }
 }

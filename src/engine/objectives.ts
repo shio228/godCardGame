@@ -26,7 +26,7 @@
  * 勝利以外の効果を持つ条件（創造の神）は `effect` を明示する。
  */
 import type { Condition, Effect, Limit, ObjectiveDef, PlayerId, TriggerEvent } from '../rules/types';
-import { Scope, type Ctx, type Engine } from './context';
+import { Scope, logAction, type Ctx, type Engine } from './context';
 import { evalCondition } from './condition';
 import { RuleError } from './errors';
 import { consumeLimit, emit, limitAvailable } from './events';
@@ -179,7 +179,7 @@ export async function revealPhase(engine: Engine): Promise<void> {
 
   for (const pick of picks) {
     const o = revealObjectiveById(engine, pick.player, pick.id);
-    engine.log.push({ depth: engine.depth, text: `${pick.player} が勝利条件を公開: ${o.name}（先行度${o.initiative}）` });
+    logAction(engine, 'reveal', `${pick.player} が勝利条件を公開: ${o.name}（先行度${o.initiative}）`, pick.player);
   }
 
   determineFirst(engine);
@@ -293,11 +293,14 @@ export async function checkObjectives(engine: Engine): Promise<void> {
       if (o.cond && !(await evalCondition(o.cond, ctx))) continue;
 
       consumeLimit(engine, key, limit);
-      engine.log.push({ depth: engine.depth, text: `勝利条件 達成: ${o.name}（${pid}）` });
+      logAction(engine, 'win', `勝利条件 達成: ${o.name}（${pid}）`, pid);
 
       const { resolve } = await import('./effects');
       await resolve(o.effect ?? WIN_SELF, ctx);
-      if (s.winner) return;
+      if (s.winner) {
+        if (s.winReason === '効果') s.winReason = `勝利条件:${o.name}`;
+        return;
+      }
     }
   }
 }

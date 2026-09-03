@@ -2271,22 +2271,24 @@ export const crestOfMajesty: CardDef = {
       effect: {
         t: 'seq',
         of: [
+          // 選択はプレイ時、参照は「その項目が乗っている間ずっと」なので
+          // let（効果ツリー内で閉じる）では届かない。snapshot で項目に残す
           {
-            t: 'let',
-            name: 'buffed',
+            t: 'snapshot',
+            name: 'buffedSp',
             select: { of: 'species', sel: { t: 'choose', chooser: { t: 'self' } } },
-            then: {
-              t: 'grantContinuous',
-              duration: 'whileOnStack',
-              onceOnly: true,
-              mod: {
-                t: 'damageDelta',
-                amount: 3,
-                who: { t: 'self' },
-                direction: 'dealt',
-                tags: ['attackOrder'],
-                species: { is: { t: 'var', name: 'buffed' } },
-              },
+          },
+          {
+            t: 'grantContinuous',
+            duration: 'whileOnStack',
+            onceOnly: true,
+            mod: {
+              t: 'damageDelta',
+              amount: 3,
+              who: { t: 'self' },
+              direction: 'dealt',
+              tags: ['attackOrder'],
+              species: { is: { t: 'var', name: 'buffedSp' } },
             },
           },
           { t: 'addToStack', payload: { t: 'action', action: 'life/attackOrder' } },
@@ -2294,7 +2296,9 @@ export const crestOfMajesty: CardDef = {
       },
     },
   ],
-  note: '「重複はしない」= grantContinuous.onceOnly。damageDelta を種族で絞れるのは damage.species があるから。',
+  note:
+    '「重複はしない」= grantContinuous.onceOnly。damageDelta を種族で絞れるのは damage.species があるから。' +
+    '種族の束縛は snapshot（加護の紋章と同じ形）— let だと継続的効果が評価される頃にはスコープが消えている。',
 };
 
 export const finalDevotion: CardDef = {

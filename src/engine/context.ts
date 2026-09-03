@@ -13,7 +13,8 @@ import type { DamageTag, Effect, Limit, PlayerId, Value } from '../rules/types';
 import type { Chooser } from './chooser';
 import { BindingError } from './errors';
 import { PoolIndex } from './pool';
-import type { Bound, Entity, GameEvent, GameState, StackItem } from './state';
+import type { Weather } from '../rules/types';
+import type { Bound, Entity, GameEvent, GameState, Phase, StackItem } from './state';
 
 // ============================================================
 // 束縛スコープ
@@ -58,9 +59,46 @@ export function createHandlerRegistry(): HandlerRegistry {
 // エンジン（1ゲーム分の可変環境）
 // ============================================================
 
+/**
+ * ログ行の種類。リプレイのログを読むとき・絞り込むときの目印。
+ * ここに無い（`kind` を持たない）行は効果の内部から出た細かい記録。
+ */
+export type LogKind =
+  | 'phase'    // フェイズの開始
+  | 'play'     // カードのプレイ / 代替プレイ
+  | 'pass'     // パス
+  | 'draw'     // ドロー
+  | 'reveal'   // 勝利条件の公開
+  | 'resolve'  // スタック項目の解決
+  | 'trigger'  // 誘発の実行
+  | 'weather'  // 天候が起こした処理
+  | 'win';     // 勝敗の確定
+
+/**
+ * 行動ログ1行ぶんの盤面の写し。
+ * リプレイの表示（ライフの推移・スタックの高さ・そのときの天候）に使う軽量な記録で、
+ * ルールの判定には一切使わない。数値6つぶんなので記録が重くならない。
+ */
+export interface LogSnapshot {
+  /** [P1, P2] */
+  life: [number, number];
+  hand: [number, number];
+  /** スタック上の項目数（全スタックの合計） */
+  stack: number;
+  weather: Weather;
+  apocalypse: boolean;
+}
+
 export interface LogEntry {
   depth: number;
   text: string;
+  /** 記録した時点のサイクルとフェイズ（リプレイのログを時系列で読むため） */
+  cycle?: number;
+  phase?: Phase;
+  kind?: LogKind;
+  player?: PlayerId;
+  /** 行動ログ（`kind` を持つ行）にだけ付く盤面の写し */
+  snap?: LogSnapshot;
 }
 
 /** 誘発待ちの1件 */
@@ -155,7 +193,39 @@ export function lookupOpt(ctx: Ctx, name: string): Bound | undefined {
 }
 
 export function logLine(ctx: Ctx, text: string): void {
-  ctx.engine.log.push({ depth: ctx.engine.depth, text });
+  ctx.engine.log.push({
+    depth: ctx.engine.depth,
+    text,
+    cycle: ctx.engine.state.cycle,
+    phase: ctx.engine.state.phase,
+  });
+}
+
+/**
+ * 行動として記録するログ。`logLine` との違いは `kind` が付くことだけで、
+ * 「何が起きたか」を後から機械的に拾えるようにするためにある。
+ */
+export function logAction(engine: Engine, kind: LogKind, text: string, player?: PlayerId): void {
+  engine.log.push({
+    depth: engine.depth,
+    text,
+    kind,
+    cycle: engine.state.cycle,
+    phase: engine.state.phase,
+    snap: snapshotOf(engine),
+    ...(player ? { player } : {}),
+  });
+}
+
+function snapshotOf(engine: Engine): LogSnapshot {
+  const s = engine.state;
+  return {
+    life: [s.players.P1.life, s.players.P2.life],
+    hand: [s.players.P1.zones.hand[0]?.length ?? 0, s.players.P2.zones.hand[0]?.length ?? 0],
+    stack: s.stacks.reduce((a, st) => a + st.items.length, 0),
+    weather: s.weather,
+    apocalypse: s.apocalypse,
+  };
 }
 
 /** 暗黙束縛を積んだ ctx を作る（誘発の実行直前にエンジンが呼ぶ） */

@@ -73,6 +73,8 @@ export function sameEntity(a: Entity, b: Entity): boolean {
 export type Bound =
   | { of: 'number'; value: number }
   | { of: 'player'; value: PlayerId }
+  /** 天候。weatherChanged の from / to（DSL から読む手段はまだ無い） */
+  | { of: 'weather'; value: Weather }
   | { of: 'species'; value: Species }
   | { of: 'entity'; value: Entity }
   | { of: 'stack'; value: StackItem[] }
@@ -139,6 +141,12 @@ export interface ContinuousInstance {
   controller: PlayerId;
   /** 発生源のスタック項目。whileOnStack の生存判定と sourceFilter に使う */
   sourceUid?: string;
+  /**
+   * 付与した時点の発生源の snapshot を写し取ったもの。
+   * 付与された効果は発生源より長く生きうる（瞬発カードが解決してスタックから降りても
+   * `thisCycle` の効果は残る）ので、項目に置いたままだと参照できなくなる。
+   */
+  snapshots?: Record<string, Bound>;
   cond?: Condition;
   onceOnly?: boolean;
   used?: boolean;
@@ -150,6 +158,8 @@ export interface GrantedTriggerInstance {
   duration: Duration;
   controller: PlayerId;
   sourceUid?: string;
+  /** 付与した時点の発生源の snapshot（ContinuousInstance と同じ理由） */
+  snapshots?: Record<string, Bound>;
   onceOnly?: boolean;
   used?: boolean;
 }
@@ -243,6 +253,12 @@ export interface GameState {
   /** LCG の内部状態 */
   rng: number;
   winner?: PlayerId | 'draw';
+  /**
+   * 勝敗が決まった理由（「ライフ0」「勝利条件:十連撃の誓約」「降伏」…）。
+   * 自動対戦で「特殊勝利ごとの達成率」を出すために持つ。
+   * **最初に決まった理由だけを残す** — 勝敗は一度しか決まらない。
+   */
+  winReason?: string;
 }
 
 // ============================================================
@@ -370,6 +386,16 @@ export function shufflePile(state: GameState, pile: Pile): void {
     pile[i] = b;
     pile[j] = a;
   }
+}
+
+/**
+ * 勝敗を確定させる唯一の入口。すでに決まっているなら何もしない
+ * （吹雪の同時死亡で「先に死んだ方が負け」が成り立つのはこの性質による）。
+ */
+export function setWinner(state: GameState, winner: PlayerId | 'draw', reason: string): void {
+  if (state.winner) return;
+  state.winner = winner;
+  state.winReason = reason;
 }
 
 export function opponentOf(p: PlayerId): PlayerId {

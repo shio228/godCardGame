@@ -35,10 +35,12 @@ import {
   entityOwner,
   playerEntity,
   sameEntity,
+  setWinner,
   type Entity,
   type StackItem,
 } from './state';
 import { evalValue } from './value';
+import { weatherNoCycleBonus, weatherNoEvasion } from './weather';
 
 export interface DamageSpec {
   to: Entity;
@@ -46,7 +48,11 @@ export interface DamageSpec {
   tags: DamageTag[];
   species?: Species;
   flags: DamageFlags;
-  /** 誰が与えたか */
+  /**
+   * 誰が与えたか。
+   * `tags` に `'weather'` を含むダメージは**プレイヤーが与えたものではない**ので、
+   * ここに何が入っていても「与える側」としては扱わない（`dealerOf`）。
+   */
   dealer: PlayerId;
   /** 発生源のスタック項目 */
   source?: StackItem;
@@ -63,12 +69,22 @@ export interface DamageResult {
   target: Entity;
 }
 
-/** サイクルボーナスが乗らない天候 */
-const NO_CYCLE_BONUS_WEATHER = ['rain', 'downpour'];
+/**
+ * 「与えた側」。天候ダメージは誰かが与えたものではないので undefined になる。
+ *
+ * これがないと、炎天や吹雪のダメージが**受けた本人の与えたダメージ**として扱われ、
+ * 大地の「攻勢」（与ダメ+1）が乗り、「10回目のダメージを与えたなら勝利」まで進んでしまう。
+ * 天候ダメージへの修正は受ける側（`direction:'taken'`）で書く — 気炎万丈の
+ * 「炎天のダメージにダメージボーナスが付与される」がその形になっている。
+ */
+function dealerOf(spec: DamageSpec): PlayerId | undefined {
+  return spec.tags.includes('weather') ? undefined : spec.dealer;
+}
 
 export async function dealDamage(ctx: Ctx, spec: DamageSpec): Promise<DamageResult> {
   const s = state(ctx);
   const engine = ctx.engine;
+  const dealer = dealerOf(spec);
 
   // ---- 1. 基礎値 ----
   let v = spec.amount;
@@ -83,14 +99,14 @@ export async function dealDamage(ctx: Ctx, spec: DamageSpec): Promise<DamageResu
     spec.flags.ignoreCycleBonus === true ||
     cardIgnore ||
     globalIgnore ||
-    NO_CYCLE_BONUS_WEATHER.includes(s.weather) ||
+    weatherNoCycleBonus(s.weather) ||
     spec.tags.includes('weather');
   if (!cycleBlocked) v += s.cycle;
 
-  // ---- 3. 与ダメ加算 ----
+  // ---- 3. 与ダメ加算 ----（天候ダメージには「与える側」がいないので乗らない）
   for (const am of await activeMods(engine, 'damageDelta')) {
     if (am.mod.direction !== 'dealt') continue;
-    if (!(await modAppliesToDealer(ctx, am, am.mod, spec))) continue;
+    if (!(await modAppliesToDealer(ctx, am, am.mod, spec, dealer))) continue;
     v += await evalValue(am.mod.amount, modCtx(engine, am));
   }
 
@@ -107,7 +123,7 @@ export async function dealDamage(ctx: Ctx, spec: DamageSpec): Promise<DamageResu
   // ---- 追加: 付与されたダメージフラグ（damageFlagGrant）を合流 ----
   const flags: DamageFlags = { ...spec.flags };
   for (const am of await activeMods(engine, 'damageFlagGrant')) {
-    if (!(await modAppliesToDealer(ctx, am, am.mod, spec))) continue;
+    if (!(await modAppliesToDealer(ctx, am, am.mod, spec, dealer))) continue;
     Object.assign(flags, am.mod.flags);
   }
 
@@ -213,7 +229,7 @@ export async function dealDamage(ctx: Ctx, spec: DamageSpec): Promise<DamageResu
       const who = await resolvePlayers(am.mod.who, modCtx(engine, am));
       if (!who.includes(victim)) continue;
       if (am.mod.tags && !am.mod.tags.some((t) => spec.tags.includes(t))) continue;
-      if (am.mod.species && !(spec.species && matchSpecies(spec.species, am.mod.species, ctx))) continue;
+      if (am.mod.species && !(spec.species && matchSpecies(spec.species, am.mod.species, modCtx(ctx.engine, am)))) continue;
       if (!(await sourceMatches(ctx, am, am.mod.sourceFilter, spec))) continue;
       const cap = await evalValue(am.mod.amount, modCtx(engine, am));
       const reduced = Math.min(cap, v);
@@ -231,7 +247,10 @@ export async function dealDamage(ctx: Ctx, spec: DamageSpec): Promise<DamageResu
   }
 
   // ---- 9. 回避判定（軽減前の値で判定する）----
-  if (!flags.unavoidable && p.status.evasion > 0 && evasionInput <= p.status.evasion) {
+  // 晴・炎天は「攻撃が必ず当たる」ので回避が働かない（企画書の天候表）。
+  // その天候の効果を受けない側（自在の神翼）だけが回避できる。
+  const alwaysHits = weatherNoEvasion(s.weather) && !(await isWeatherImmune(engine, victim));
+  if (!flags.unavoidable && !alwaysHits && p.status.evasion > 0 && evasionInput <= p.status.evasion) {
     logLine(ctx, `回避: ${evasionInput} ≤ 回避${p.status.evasion}`);
     v = 0;
   }
@@ -265,12 +284,13 @@ async function emitDamage(
     ...(spec.source ? { source: { of: 'stack' as const, value: [spec.source] } } : {}),
     ...(spec.species ? { species: { of: 'species' as const, value: spec.species } } : {}),
   };
+  const dealer = dealerOf(spec);
   const base = {
     tags: spec.tags,
     amount: applied,
     entity: target,
-    dealer: spec.dealer,
     bindings,
+    ...(dealer ? { dealer } : {}),
     ...(spec.source ? { sourceUid: spec.source.uid } : {}),
     ...(spec.species ? { species: spec.species } : {}),
   };
@@ -278,7 +298,8 @@ async function emitDamage(
   // units は設計書 §5 の用語に合わせて、
   //   damageDealt → 「与えたダメージ」（修正込み・軽減前）
   //   damageTaken → 「実際に通ったダメージ」
-  await emit(ctx, { kind: 'damageDealt', player: spec.dealer, ...base, units: dealt });
+  // 天候ダメージには主体がいないので player を載せない（countEvent.by が拾わない）
+  await emit(ctx, { kind: 'damageDealt', ...(dealer ? { player: dealer } : {}), ...base, units: dealt });
   await emit(ctx, { kind: 'damageTaken', player: entityOwner(target), ...base, units: applied });
 }
 
@@ -291,7 +312,7 @@ async function isPrevented(ctx: Ctx, spec: DamageSpec, victim: PlayerId): Promis
       const ws = Array.isArray(am.mod.weather) ? am.mod.weather : [am.mod.weather];
       if (!ws.includes(state(ctx).weather)) continue;
     }
-    if (am.mod.species && !(spec.species && matchSpecies(spec.species, am.mod.species, ctx))) continue;
+    if (am.mod.species && !(spec.species && matchSpecies(spec.species, am.mod.species, modCtx(ctx.engine, am)))) continue;
     if (!(await sourceMatches(ctx, am, am.mod.sourceFilter, spec))) continue;
     return true;
   }
@@ -311,11 +332,13 @@ async function modAppliesToDealer(
   am: ActiveMod,
   mod: DealerScopedMod,
   spec: DamageSpec,
+  dealer: PlayerId | undefined,
 ): Promise<boolean> {
+  if (dealer === undefined) return false;
   const who = await resolvePlayers(mod.who, modCtx(ctx.engine, am));
-  if (!who.includes(spec.dealer)) return false;
+  if (!who.includes(dealer)) return false;
   if (mod.tags && !mod.tags.some((t) => spec.tags.includes(t))) return false;
-  if (mod.species && !(spec.species && matchSpecies(spec.species, mod.species, ctx))) return false;
+  if (mod.species && !(spec.species && matchSpecies(spec.species, mod.species, modCtx(ctx.engine, am)))) return false;
   if (mod.sourceFilter) {
     if (!spec.source) return false;
     if (!(await matchStack(spec.source, mod.sourceFilter, modCtx(ctx.engine, am)))) return false;
@@ -377,8 +400,8 @@ export async function changeLife(ctx: Ctx, who: PlayerId, delta: number): Promis
     bindings: { delta: { of: 'number', value: actual } },
   });
 
-  if (p.life <= 0 && !s.winner) {
-    s.winner = who === 'P1' ? 'P2' : 'P1';
+  if (p.life <= 0) {
+    setWinner(s, who === 'P1' ? 'P2' : 'P1', 'ライフ0');
   }
 }
 

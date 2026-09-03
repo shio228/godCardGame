@@ -13,14 +13,22 @@
  * 置換効果もここに含まれる。**その操作を実行する経路が必ずこの層を通る**ことが
  * 設計の肝で、直接 life を引く / hand.push する場所をエンジン内に作らない。
  */
-import type { Ability, ContinuousMod, PlayerId } from '../rules/types';
+import type { Ability, ContinuousMod, EventKind, PlayerId } from '../rules/types';
 import { Scope, type Ctx, type Engine } from './context';
 import { evalCondition } from './condition';
+import { NotImplementedError } from './errors';
 // select.ts とは循環参照になるが、どちらも関数宣言のみを export しているため
 // ESM の巻き上げで解決される。
 import { resolvePlayers, resolveSpecies, resolveStack } from './select';
 import { eachRevealedObjective } from './objectives';
-import { opponentOf, type Entity, type GameState, type StackItem } from './state';
+import { opponentOf, type Bound, type CardInstance, type Entity, type GameState, type StackItem } from './state';
+
+/** 置換の判定に必要なイベントの最小情報（`EmitSpec` の部分集合） */
+export interface ReplaceableEvent {
+  kind: EventKind;
+  player?: PlayerId;
+  itemUid?: string;
+}
 
 export interface ActiveMod {
   mod: ContinuousMod;
@@ -28,10 +36,14 @@ export interface ActiveMod {
   controller: PlayerId;
   /** 発生源のスタック項目（sourceFilter / whileOnStack 用） */
   item?: StackItem;
+  /** 発生源が手札のカードなら、そのカード（`active:'inHand'`） */
+  card?: CardInstance;
   /** ログ用 */
   origin: string;
   /** grantContinuous 由来なら、その実体（onceOnly の消費に使う） */
   instanceId?: string;
+  /** 付与時に写し取った発生源の snapshot（発生源が消えた後も参照できるようにする） */
+  snapshots?: Record<string, Bound>;
 }
 
 /** そのモッドを評価するための ctx を作る */
@@ -45,22 +57,25 @@ export function modCtx(engine: Engine, am: ActiveMod): Ctx {
     ctx.item = am.item;
     ctx.stackId = am.item.stackId;
   }
+  // 付与時に写し取った snapshot（発生源がスタックから降りた後も参照できる）
+  if (am.snapshots) for (const [k, v] of Object.entries(am.snapshots)) ctx.vars.set(k, v);
   return ctx;
 }
 
 function abilityMods(
   abilities: Ability[],
-  where: 'always' | 'onStack' | 'inField',
+  where: 'always' | 'onStack' | 'inField' | 'inHand',
   controller: PlayerId,
   origin: string,
-  item?: StackItem,
+  source?: { item?: StackItem; card?: CardInstance },
 ): ActiveMod[] {
   const out: ActiveMod[] = [];
   for (const ab of abilities) {
     if (ab.kind !== 'continuous') continue;
     if (ab.active !== where && ab.active !== 'always') continue;
     const am: ActiveMod = { mod: ab.mod, controller, origin };
-    if (item) am.item = item;
+    if (source?.item) am.item = source.item;
+    if (source?.card) am.card = source.card;
     out.push(am);
   }
   return out;
@@ -82,8 +97,17 @@ export function gatherMods(engine: Engine): ActiveMod[] {
     for (const it of st.items) {
       if (it.kind === 'card' && it.card) {
         const def = engine.pool.card(it.card.defId);
-        out.push(...abilityMods(def.abilities, 'onStack', it.controller, `カード:${def.name}`, it));
+        out.push(...abilityMods(def.abilities, 'onStack', it.controller, `カード:${def.name}`, { item: it }));
       }
+    }
+  }
+
+  // ⑥ 手札のカード（`active:'inHand'`）。スカイエンハンスの
+  //    「このカードを瞬発を持つかのようにプレイしてもよい」がここから出る
+  for (const pid of ['P1', 'P2'] as PlayerId[]) {
+    for (const c of s.players[pid].zones.hand[0] ?? []) {
+      const def = engine.pool.card(c.defId);
+      out.push(...abilityMods(def.abilities, 'inHand', pid, `手札:${def.name}`, { card: c }));
     }
   }
 
@@ -116,6 +140,7 @@ export function gatherMods(engine: Engine): ActiveMod[] {
       controller: inst.controller,
       origin: `付与:${inst.id}`,
       instanceId: inst.id,
+      ...(inst.snapshots ? { snapshots: inst.snapshots } : {}),
     };
     if (inst.sourceUid) {
       const item = findItem(s, inst.sourceUid);
@@ -155,7 +180,7 @@ export async function activeMods<K extends ContinuousMod['t']>(
     if (inst?.cond) {
       if (!(await evalCondition(inst.cond, modCtx(engine, am)))) continue;
     }
-    const abilityCond = am.item ? abilityCondFor(engine, am) : undefined;
+    const abilityCond = am.item || am.card ? abilityCondFor(engine, am) : undefined;
     if (abilityCond && !(await evalCondition(abilityCond, modCtx(engine, am)))) continue;
     out.push(am as ActiveMod & { mod: Extract<ContinuousMod, { t: K }> });
   }
@@ -164,13 +189,81 @@ export async function activeMods<K extends ContinuousMod['t']>(
 
 /** カードの continuous ability に付いた cond を引く（天水の祝福の「豪雨なら」） */
 function abilityCondFor(engine: Engine, am: ActiveMod) {
-  const it = am.item;
-  if (!it || it.kind !== 'card' || !it.card) return undefined;
-  const def = engine.pool.card(it.card.defId);
+  const defId = am.card?.defId ?? (am.item?.kind === 'card' ? am.item.card?.defId : undefined);
+  if (!defId) return undefined;
+  const def = engine.pool.card(defId);
   for (const ab of def.abilities) {
     if (ab.kind === 'continuous' && ab.mod === am.mod) return ab.cond;
   }
   return undefined;
+}
+
+// ============================================================
+// 汎用の置換効果（replaceEvent）
+// ============================================================
+
+/**
+ * `replaceEvent` を実際に通している経路。
+ * ここに無いイベントの置換は「置き換わらずに素通りする」= 黙って無視することになるので、
+ * 付与された時点で `NotImplementedError` にする（`assertReplaceSupported`）。
+ */
+export const REPLACEABLE_EVENTS: EventKind[] = ['weatherNegate'];
+
+export function assertReplaceSupported(mod: ContinuousMod): void {
+  if (mod.t !== 'replaceEvent') return;
+  const kinds = Array.isArray(mod.when.on) ? mod.when.on : [mod.when.on];
+  for (const k of kinds) {
+    if (!REPLACEABLE_EVENTS.includes(k)) {
+      throw new NotImplementedError(`イベント "${k}" の置換（replaceEvent）`, mod);
+    }
+  }
+  if (mod.when.subject || mod.when.tags || mod.when.species || mod.when.granularity) {
+    throw new NotImplementedError('replaceEvent の subject / tags / species / granularity', mod);
+  }
+}
+
+/**
+ * そのイベントが起きようとするとき、置換効果が代わりの処理を行うか。
+ * `true` を返したら**元の処理は行われない**。
+ *
+ * `with` を省略した置換は「単に打ち消す」（レイジングスカイ）、
+ * `optional` なら「代わりに〜してもよい」（雷光顕現）。
+ */
+export async function tryReplaceEvent(ctx: Ctx, ev: ReplaceableEvent): Promise<boolean> {
+  for (const am of await activeMods(ctx.engine, 'replaceEvent')) {
+    assertReplaceSupported(am.mod);
+    const kinds = Array.isArray(am.mod.when.on) ? am.mod.when.on : [am.mod.when.on];
+    if (!kinds.includes(ev.kind)) continue;
+
+    const mctx = modCtx(ctx.engine, am);
+    if (am.mod.who !== undefined) {
+      if (ev.player === undefined) continue;
+      const who = await resolvePlayers(am.mod.who, mctx);
+      if (!who.includes(ev.player)) continue;
+    }
+    if (am.mod.when.filter) {
+      if (!ev.itemUid) continue;
+      const item = findItem(ctx.engine.state, ev.itemUid);
+      if (!item) continue;
+      const { matchStack } = await import('./select');
+      if (!(await matchStack(item, am.mod.when.filter, mctx))) continue;
+    }
+    if (am.mod.when.cond && !(await evalCondition(am.mod.when.cond, mctx))) continue;
+
+    if (am.mod.optional) {
+      const ok = await ctx.engine.chooser.confirm({
+        player: am.controller,
+        prompt: `${am.origin}: 代わりの処理を行う？`,
+      });
+      if (!ok) continue;
+    }
+    if (am.mod.with) {
+      const { resolve } = await import('./effects');
+      await resolve(am.mod.with, mctx);
+    }
+    return true;
+  }
+  return false;
 }
 
 // ============================================================
