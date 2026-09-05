@@ -270,11 +270,9 @@ export async function tryReplaceEvent(ctx: Ctx, ev: ReplaceableEvent): Promise<b
 // 対象に取れるか（untargetable）
 // ============================================================
 
-let targetCheckDepth = 0;
-
 export async function isTargetableItem(ctx: Ctx, it: StackItem): Promise<boolean> {
-  if (targetCheckDepth > 0) return true; // untargetable の内部評価での再帰を切る
-  targetCheckDepth++;
+  if (ctx.engine.targetCheckDepth > 0) return true; // untargetable の内部評価での再帰を切る
+  ctx.engine.targetCheckDepth++;
   try {
     const mods = await activeMods(ctx.engine, 'untargetable');
     for (const am of mods) {
@@ -287,13 +285,13 @@ export async function isTargetableItem(ctx: Ctx, it: StackItem): Promise<boolean
     }
     return true;
   } finally {
-    targetCheckDepth--;
+    ctx.engine.targetCheckDepth--;
   }
 }
 
 export async function isTargetableEntity(ctx: Ctx, e: Entity): Promise<boolean> {
-  if (targetCheckDepth > 0) return true;
-  targetCheckDepth++;
+  if (ctx.engine.targetCheckDepth > 0) return true;
+  ctx.engine.targetCheckDepth++;
   try {
     const mods = await activeMods(ctx.engine, 'untargetable');
     for (const am of mods) {
@@ -309,7 +307,7 @@ export async function isTargetableEntity(ctx: Ctx, e: Entity): Promise<boolean> 
     }
     return true;
   } finally {
-    targetCheckDepth--;
+    ctx.engine.targetCheckDepth--;
   }
 }
 

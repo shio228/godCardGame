@@ -20,8 +20,9 @@
  * 読み込みは `src/rules/decks.load.ts`。
  */
 import type { CardDef, God, ObjectiveDef } from '../rules/types';
+import { DECK_MAX, DECK_MIN, MAX_COPIES, OBJECTIVE_MIN } from '../rules/limits';
 import { EngineError } from './errors';
-import { DECK_MAX, DECK_MIN, MAX_COPIES, type DeckList } from './flow';
+import type { DeckList } from './flow';
 import type { PoolIndex } from './pool';
 
 /** デッキリストの記述ミス。行番号つきで、直し方が分かる文面にする */
@@ -157,12 +158,16 @@ function resolveObjectives(
   if (given.length === 0) {
     return [...pool.objectives.values()].filter((o) => o.god === god).map((o) => o.id);
   }
-  return given.map(({ line, name }) => {
+  const ids = given.map(({ line, name }) => {
     const o = byName.get(name);
     if (!o) fail(line, `"${name}" という勝利条件は無い`, suggest(name, byName.keys()));
     if (o.god !== god) fail(line, `"${name}" は ${o.god} の勝利条件なので ${god} では採用できない`);
     return o.id;
   });
+  if (ids.length < OBJECTIVE_MIN) {
+    fail(given[0]!.line, `勝利条件は${OBJECTIVE_MIN}つ以上採用する（いまは${ids.length}つ）`);
+  }
+  return ids;
 }
 
 // ============================================================

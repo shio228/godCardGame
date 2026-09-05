@@ -30,6 +30,7 @@ import { Scope, logAction, type Ctx, type Engine } from './context';
 import { evalCondition } from './condition';
 import { RuleError } from './errors';
 import { consumeLimit, emit, limitAvailable } from './events';
+import { OBJECTIVE_MIN } from '../rules/limits';
 
 /** 「あなたは勝利する」— `effect` を省略した条件の既定の中身 */
 const WIN_SELF: Effect = { t: 'win', player: { t: 'self' } };
@@ -82,7 +83,7 @@ export function setupObjectives(
   ids: string[],
   opts: SetupObjectivesOptions = {},
 ): void {
-  const min = opts.min ?? 3;
+  const min = opts.min ?? OBJECTIVE_MIN;
   if (ids.length < min) {
     throw new RuleError(`${player}: 特殊勝利条件は${min}つ以上採用しなければならない（${ids.length}つ）`);
   }

@@ -253,6 +253,7 @@ export class GreedyChooser implements Chooser {
       budget: this.budget,
       steps: 0,
       resolving: new Set<string>(),
+      targetCheckDepth: 0,
     };
   }
 }

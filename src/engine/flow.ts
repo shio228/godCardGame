@@ -21,6 +21,7 @@ import { NotImplementedError, RuleError } from './errors';
 import { PoolIndex } from './pool';
 import { revealPhase, setupObjectives } from './objectives';
 import { matchStack, resolveEntities, resolvePlayers } from './select';
+import { DECK_MAX, DECK_MIN, HAND_LIMIT, MAX_COPIES } from '../rules/limits';
 import { applyWeatherNegation } from './weather';
 import {
   createState,
@@ -58,6 +59,7 @@ export function createEngine(opts: CreateEngineOptions): Engine {
     budget: opts.budget ?? 10000,
     steps: 0,
     resolving: new Set<string>(),
+    targetCheckDepth: 0,
   };
 }
 
@@ -93,12 +95,9 @@ export function putInHand(engine: Engine, owner: PlayerId, defIds: string[]): Ca
 // ゲーム開始（企画書「基本ルール」）
 // ============================================================
 
-/** デッキ構築の制約。すべて企画書「基本ルール」の数値 */
-export const DECK_MIN = 30;
-export const DECK_MAX = 40;
-export const MAX_COPIES = 3;
-/** 手札上限。持ち越せる最大数 */
-export const HAND_LIMIT = 10;
+// デッキ構築と手札の上限は `src/rules/limits.ts`（企画書「基本ルール」の数値）。
+// ここから使うぶんを import しつつ、これまでどおり flow から引けるように再exportする
+export { DECK_MIN, DECK_MAX, MAX_COPIES, HAND_LIMIT, OBJECTIVE_MIN } from '../rules/limits';
 
 /**
  * サイクル別のドロー枚数（企画書「基本ドロー枚数」）。

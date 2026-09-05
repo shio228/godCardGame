@@ -1,19 +1,22 @@
-# 実装ロードマップ（2026-09-02 時点）
+# 実装ロードマップ（2026-09-04 時点）
 
-前回のロードマップの**優先度1〜5をすべて実装した**。
-このファイルはその続きで、**ここから何を、どの順で書くか**を記録する。
+**遠隔対戦（Vercel + React）が動くところまで来た。**
+このファイルは、ここから何を、どの順で書くかを記録する。
 
 ## 現在地（実測）
 
 ```
 npm run typecheck   # クリーン
-npm test            # 167件 / 167件 pass
+npm test            # 240件 / 240件 pass
 npm run sweep       # 88 / 92 枚
 npm run deck        # decks/*.txt の検証と要約
+npm run builder     # デッキビルダー（ブラウザで組む）を tmp/deckbuilder.html に出す
 npm run play        # 対話プレイ（自分で1試合打つ）
 npm run simulate    # ランダムAI / 目的志向AI の対戦と比較（--compare）
 npm run replay      # 1試合を記録 → 再生して一致を確認
 npm run dashboard   # 上記をまとめた HTML を tmp/dashboard.html に出す
+npm run build       # 対戦画面を public/index.html に束ねる（React ごと1枚）
+npm run serve       # 対戦サーバ（http://localhost:5173）。2人でもAIとでも遊べる
 ```
 
 | 領域 | 状態 |
@@ -33,9 +36,14 @@ npm run dashboard   # 上記をまとめた HTML を tmp/dashboard.html に出�
 | 打ち手 | **ランダム / 目的志向（勝利条件を狙う）の2種**（`ai.ts` / `progress.ts`） |
 | ダッシュボード | テスト・煙テスト・自動対戦・リプレイを1枚のHTMLに（`tools/dashboard.ts`） |
 | デッキ | **手組み（`decks/*.txt`）に置き換え済み**。自動生成の `sampleDeck` は廃止 |
-| 対話プレイ | **`npm run play` でターミナルから自分で打てる**（記録・再生に載る） |
+| 対話プレイ | `npm run play` でターミナルから自分で打てる（記録・再生に載る） |
+| デッキビルダー | **ブラウザで組める**（`npm run builder`。Artifact でも配れる） |
 | handler 3件 | 実装済み（`src/engine/handlers.ts`）。sweep の失敗は残り4枚＝プレイ条件未達だけ |
-| サーバ / UI | 未着手 |
+| 視点別ビュー | **実装済み**（`src/engine/view.ts`）。隠された情報はホワイトリストで組み立てる |
+| 部屋・再生 | **実装済み**（`src/net/`）。対戦の実体は「選択の列」で、盤面は選択のたびに再生して作る |
+| HTTP の経路 | **実装済み**（`api/v.ts` / `api/state.ts` / `api/game.ts` + `server/dev.ts`） |
+| 対戦画面（React） | **実装済み**（`src/browser/`）。ロビー・盤面・選択バー・再接続・AI対戦・デッキ持ち込み |
+| 保存先 | メモリ（ローカル）と Upstash Redis（Vercel）。Postgres へは実装1本で移せる |
 
 ---
 
@@ -194,7 +202,20 @@ objectives: 十連撃の誓約, 完全武装の証明, 一撃必殺   ← 省略
 npm run deck                      # decks/ を全部検証
 npm run deck -- decks/earth.txt   # 1つを詳しく（勝利条件・タイプ内訳・内訳）
 npm run deck -- decks/earth.txt --text   # 各カードの印刷テキストも
+npm run builder                   # ブラウザで組む（tmp/deckbuilder.html）
+npm run builder -- --fragment     # Artifact 公開用
 ```
+
+### デッキビルダー（ブラウザ）
+
+カードのテキストを見ながら枚数を調整し、その場で検証して `decks/*.txt` に貼れるテキストを出す。
+**リポジトリを持っていない人（企画側）でも Artifact のURLだけで触れる。**
+
+- 左に神ごとのカードプール（名前・テキスト・タイプで検索、タイプで絞り込み、`＋`/`−` で枚数）
+- 中央にデッキ（枚数ゲージ・勝利条件の選択）、右に検証と内訳（タイプ別・キーワード・プレイ制限つき枚数）
+- 下にデッキリストのテキスト（コピー）と、貼り付けて読み込む欄。`decks/` の4デッキは同梱してある
+- **合否の判定はエンジンと同じパーサ**（`decklist.ts`）を esbuild で束ねて画面から呼んでいる。
+  画面で通れば `npm run deck` も必ず通る（別々に数え直すとズレるため、そこは共有した）
 
 - **カード名で書く。** 92枚すべて名前が重複しておらず、`validateDeck` の「同名3枚まで」も
   名前で数えているので数え方が一致する。名前が違えば**行番号と候補**を出して落ちる
@@ -239,19 +260,34 @@ npm run simulate -- --save tmp/records                   # 落ちた試合の記
 
 ---
 
-## 優先度4: サーバ / UI
+## 優先度4: 遠隔対戦（実装済み・ここから先の残り）
 
-順序は未確定。
+**離れた2人がブラウザで対戦できる状態になっている。** 手順は `docs/deploy.md`。
 
-- サーバ / 通信 — Colyseus（Node + TypeScript、ターン制カードゲームの公式デモあり）
-- UI — React + TypeScript（DOM）。カードのテキストとツールチップが主役なので
-  Canvas系より DOM が向く。演出が要るようになったら PixiJS か Phaser 4 を上に重ねる
+```
+npm run build && npm run serve    # 手元で2人 or AI と対戦
+```
+
+### 何をどう作ったか
+
+- **対戦の実体は「選択の列」。** Vercel の関数は常駐せず呼び出しをまたいで何も覚えていないが、
+  このエンジンは乱数が `GameState.rng` だけなので `(セットアップ, シード, 選択の列)` から
+  盤面を完全に再現できる。保存物は `GameRecord` そのもので、`npm run replay` にもそのまま載る
+- **止め方**: 記録が尽きたら `Chooser` が例外を投げる。スタックが畳まれて `resumeGame` まで戻り、
+  `engine.state` は**その選択を求めた瞬間の盤面**のまま残る（`src/net/resume.ts`）
+- **費用**: エンジンを回すのは `POST /api/game`（選択が入ったとき）だけ。
+  ポーリングは `GET /api/v`（版番号1つ）で、**エンジンを import すらしていない**
+  （`src/net/routes.test.ts` が構造として見張る）。実測は1試合まるごとで 0.2 秒（`src/net/cost.test.ts`）
+- **隠された情報**は `src/engine/view.ts` が見せてよいものだけを積む（削らない）
+
+### 残っている画面まわり
+
+- **演出**（アニメーション）。ビューに `snap` 付きのログを載せてあるので、
+  「前回からの差分」をタイムラインとして再生できる形にはなっている
+- 観戦・チャット・持ち時間・アカウント・マッチメイキング（部屋コードだけ）
+- カード画像（まだ存在しない）
 - 画面定義書側の残り — ログイン / 新規登録 / デッキ編集 / マッチング
-- カード画像・テキストの整備
-
-`Chooser` インターフェース（`select` / `number` / `confirm` / `order`）が
-UI との唯一の接点になる。`PLAY_PROMPT` を目印にすれば「プレイかパスか」の選択を
-UI 側で特別扱いできる。
+- **スマホの画面幅**（900px 以下でログを隠すところまでしかやっていない）
 
 ---
 
@@ -272,6 +308,8 @@ UI 側で特別扱いできる。
   範囲外の数を返すなど）。実害は出ていないが、AIを賢くするときに整理する
 - **`simulate` の「効果」勝因**（2.9%）は `{t:'win'}` を直接持つカード由来。
   どのカードかまでは記録していない
+- **投了は記録に残らない**。`RoomService` が記録の外側で結果を決めている
+  （エンジンの `surrender` と同じ結果になるが、`replayGame` では再現されない）
 
 ---
 

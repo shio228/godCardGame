@@ -13,7 +13,11 @@ npm run simulate    # 自動対戦。神別勝率・決着サイクル・勝因�
 npm run replay      # 1試合を記録して再生する（落ちた試合を1手ずつ追う）
 npm run dashboard   # テスト・煙テスト・自動対戦・リプレイを1枚のHTMLにする
 npm run deck        # 手組みデッキ（decks/*.txt）の検証と要約
+npm run builder     # デッキビルダー（ブラウザで組む1枚のHTML）を生成する
 npm run play        # 対話プレイ（自分で1試合打つ）
+npm run build       # 対戦画面を public/index.html に束ねる（React ごと1枚）
+npm run serve       # 対戦サーバ。ブラウザで2人 or AI と対戦（http://localhost:5173）
+npm run gen:decks   # decks/*.txt を src/rules/decks.generated.ts に埋め込み直す
 ```
 
 変更したら `typecheck` → `test` → `sweep` を必ず全部通す。
@@ -32,7 +36,8 @@ npm run play        # 対話プレイ（自分で1試合打つ）
 |---|---|---|
 | `docs/roadmap.md` | 現在地、残タスクと優先順位、既知の不具合、蒸し返さない決定 | 毎回 |
 | `docs/rule-engine-design.md` | DSLの設計思想、ダメージパイプライン11段、確定事項 | `src/rules/types.ts` を触るとき |
-| `docs/engine-notes.md` | エンジン実装の判断記録、勝利条件の実装仕様 | `src/engine/` を触るとき |
+| `docs/engine-notes.md` | エンジン実装の判断記録、勝利条件の実装仕様、遠隔対戦の設計判断 | `src/engine/` `src/net/` を触るとき |
+| `docs/deploy.md` | 遠隔対戦の動かし方、Vercel と Upstash の手順、費用の考え方 | サーバまわりを触るとき |
 
 ## ディレクトリ
 
@@ -44,6 +49,19 @@ npm run play        # 対話プレイ（自分で1試合打つ）
 | `decks/*.txt` | **手組みデッキ**（カード名で書くテキスト）。自動対戦もテストもこれを使う |
 | `src/rules/decks.load.ts` | デッキファイルの読み込み。**`node:fs` を使う唯一のモジュール** |
 | `src/engine/decklist.ts` | デッキリストの書式（純粋なパーサ） |
+| `src/rules/limits.ts` | デッキ枚数・同名上限・手札上限（企画書の数値。engine とビルダーで共有） |
+| `src/browser/` | **ブラウザ用バンドルに入るコードの置き場**（`node:` を import しない） |
+| `src/engine/view.ts` | 視点別ビュー。**見せてよいものだけを組み立てる**（隠された情報の線引き） |
+| `src/net/protocol.ts` | クライアントとサーバが共有する型（`node:` も DOM も見ない） |
+| `src/net/resume.ts` | 記録を再生し、**次の選択のところで止める**。エンジンを回す唯一の場所 |
+| `src/net/room.ts` | 部屋のロジック（作る・入る・デッキ・準備・選択・投了）。HTTPを知らない |
+| `src/net/store.ts` | 保存先の契約と `MemoryStore`。`store.redis.ts` が Upstash 実装 |
+| `src/net/route.version.ts` | 版番号だけ返す経路。**エンジンを import しない**（費用の一線） |
+| `src/net/routes.ts` | 盤面と操作の経路（Web標準の `Request` / `Response`） |
+| `api/*.ts` | Vercel Functions。中身は `src/net/` を呼ぶだけ |
+| `server/dev.ts` | ローカル対戦サーバ（`npm run serve`）。`api/` と同じ関数を叩く |
+| `src/browser/game.entry.tsx` | 対戦画面（React）。`board.tsx` が盤面、`net.ts` が通信とポーリング |
+| `tools/build-client.ts` | 対戦画面を1枚のHTMLに束ねる（`tools/client.template.ts` が枠と見た目） |
 | `src/engine/effects.ts` | 解決エンジン本体（`resolve(effect, ctx)`） |
 | `src/engine/damage.ts` | ダメージパイプライン11段 |
 | `src/engine/flow.ts` | ゲーム進行。`startGame` → 6フェイズ → `runGame` |
@@ -58,6 +76,8 @@ npm run play        # 対話プレイ（自分で1試合打つ）
 | `tools/stats.ts` | 自動対戦の実行と集計（`simulate` と `dashboard` が共有） |
 | `tools/dashboard.ts` | ダッシュボードHTMLの生成 |
 | `tools/deck.ts` | デッキの検証と要約 |
+| `tools/deckbuilder.ts` | デッキビルダーHTMLの生成 |
+| `tools/theme.ts` | ダッシュボードとビルダーで共有する見た目 |
 | `tools/play.ts` / `tools/human.ts` | 対話プレイと人間用 Chooser |
 
 ## 一次資料（企画書）

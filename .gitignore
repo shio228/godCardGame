@@ -3,6 +3,9 @@ node_modules/
 dist/
 build/
 *.tsbuildinfo
+# 対戦画面の束ね先（npm run build で作る。Vercel もビルド時に作る）
+public/
+.vercel/
 
 # Claude Code
 # CLAUDE.md / .claude/settings.json / rules / skills はコミットする（プロジェクトの資産）
