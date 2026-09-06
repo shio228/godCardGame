@@ -8,8 +8,8 @@ import { samplePool } from '../rules/cards.sample';
 import { loadDeck } from '../rules/decks.load';
 import { GreedyChooser } from './ai';
 import { RandomChooser } from './chooser';
-import { createEngine, runGame, startGame } from './flow';
-import { objectiveCtx, setupObjectives } from './objectives';
+import { PLAY_PROMPT, createEngine, runGame, startGame } from './flow';
+import { objectiveCtx, revealObjectiveById, setupObjectives } from './objectives';
 import { conditionProgress, objectiveProgress, objectiveScore } from './progress';
 import type { Engine } from './context';
 import type { Condition, God } from '../rules/types';
@@ -134,6 +134,54 @@ describe('目的志向AI', () => {
       greedyObjective >= randomObjective,
       `目的志向 ${greedyObjective} / ランダム ${randomObjective}`,
     );
+  });
+
+  it('打てば得になる場面でパスしない', async () => {
+    // 相手のライフを2にして、3点飛ぶカードを持たせる。パスより明確に良いので必ず打つ
+    const chooser = new GreedyChooser({ fallback: new RandomChooser(1) });
+    const engine = createEngine({ pool: samplePool, p1God: 'earth', p2God: 'sky', seed: 3, budget: 30000, chooser });
+    chooser.attach(engine);
+    await startGame(engine, { P1: loadDeck('earth'), P2: loadDeck('sky') });
+    engine.state.phase = 'stack';
+    engine.state.players.P2.life = 2;
+
+    const { playChoices, putInHand } = await import('./flow');
+    putInHand(engine, 'P1', ['earth/crimson_ignition']);
+    const options = (await playChoices(engine, 'P1')).map((c) => ({ value: c, label: c.label }));
+    const picked = await chooser.select({
+      kind: 'card',
+      player: 'P1',
+      prompt: PLAY_PROMPT,
+      options,
+      min: 0,
+      max: 1,
+    });
+    assert.equal(picked.length, 1, 'パスしてしまった');
+    assert.equal(picked[0]!.label, '紅蓮着火');
+  });
+
+  it('スタックに載った時点の価値を見る（詠唱をあと1つ足せば勝ち）', async () => {
+    // 「打った1枚だけを即解決して測る」作りだと、スタック上でしか成立しない条件
+    //（詠唱の極致＝スタックの詠唱30）が見えず、勝ちに直結する手を見送っていた
+    const chooser = new GreedyChooser({ fallback: new RandomChooser(1) });
+    const engine = createEngine({ pool: samplePool, p1God: 'sea', p2God: 'sky', seed: 4, budget: 30000, chooser });
+    chooser.attach(engine);
+    await startGame(engine, { P1: loadDeck('sea'), P2: loadDeck('sky') });
+    revealObjectiveById(engine, 'P1', 'sea/obj_chant_thirty');
+    engine.state.phase = 'stack';
+
+    // すでにスタックに詠唱29。もう1枚積めば30で勝ち
+    const { play, playChoices, putInHand } = await import('./flow');
+    const [seed1] = putInHand(engine, 'P1', ['sea/domain_expansion']);
+    const item = await play(engine, 'P1', seed1!);
+    item.counters.chant = 29;
+
+    putInHand(engine, 'P1', ['sea/domain_expansion']);
+    const options = (await playChoices(engine, 'P1')).map((c) => ({ value: c, label: c.label }));
+    const picked = await chooser.select({ kind: 'card', player: 'P1', prompt: PLAY_PROMPT, options, min: 0, max: 1 });
+
+    assert.equal(picked.length, 1, '勝ちに届く手を打たずにパスした');
+    assert.equal(picked[0]!.label, 'ドメインエキスパンション');
   });
 
   it('試し打ちは本番の盤面を汚さない', async () => {

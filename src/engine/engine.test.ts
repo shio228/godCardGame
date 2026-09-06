@@ -324,12 +324,76 @@ describe('常在', () => {
 // 神のパッシブと誘発順
 // ============================================================
 
+describe('解決中の項目はスタックから出せない', () => {
+  // 企画側判断（2026-09-06）。これが無いと「自分自身を手札に戻す → 手札が減らないまま
+  // 打ち直す」が無限に回る（ループ・ザ・ループ / 熟達した跳躍）
+  async function board(chooser?: ConstructorParameters<typeof ScriptedChooser>[0]) {
+    const engine = setup('sky', 'earth', { ...(chooser ? { chooser } : {}) });
+    engine.state.phase = 'stack';
+    return engine;
+  }
+
+  it('ループ・ザ・ループは自分自身を手札に戻せない', async () => {
+    const engine = await board();
+    const [card] = putInHand(engine, 'P1', ['sky/loop_the_loop']);
+    const life = engine.state.players.P1.life;
+
+    await play(engine, 'P1', card!);
+
+    assert.equal(
+      engine.state.players.P1.zones.hand[0]!.some((c) => c.uid === card!.uid),
+      false,
+      '自分自身が手札に戻っている（無限ループの元）',
+    );
+    assert.equal(engine.state.players.P1.life, life, '戻せていないので回復も起きない');
+  });
+
+  it('熟達した跳躍も自分自身は戻せない', async () => {
+    // モードは「スタック上のあなたのカードを1枚手札に戻す」を選ぶ
+    const engine = await board([{ selectLabels: ['スタック上のあなたのカードを1枚手札に戻す。'] }]);
+    const [card] = putInHand(engine, 'P1', ['sky/masterful_leap']);
+
+    await play(engine, 'P1', card!);
+
+    assert.equal(
+      engine.state.players.P1.zones.hand[0]!.some((c) => c.uid === card!.uid),
+      false,
+      '自分自身が手札に戻っている',
+    );
+  });
+
+  it('別のカードなら戻せる（機能は死んでいない）', async () => {
+    const engine = await board();
+    // 「あなたの手札に等しい枚数まで」戻すカードなので、手札が空だと0枚しか戻せない
+    putInHand(engine, 'P1', ['sky/quick_change', 'sky/quick_change']);
+    // 先に瞬発でないカードをスタックに置く
+    const [first] = putInHand(engine, 'P1', ['sky/accelerate_gale']);
+    const item = await play(engine, 'P1', first!);
+    const life = engine.state.players.P1.life;
+
+    const [loop] = putInHand(engine, 'P1', ['sky/loop_the_loop']);
+    await play(engine, 'P1', loop!);
+
+    assert.equal(
+      engine.state.players.P1.zones.hand[0]!.some((c) => c.uid === item.card?.uid),
+      true,
+      '別のカードは手札に戻る',
+    );
+    assert.equal(engine.state.players.P1.life, life + 1, '戻した枚数だけ回復する');
+  });
+});
+
 describe('サイクル開始', () => {
-  it('生命の神はサイクル開始時に全種2体を得る', async () => {
+  it('生命の神はサイクル開始時に1種類を選んで2体得る', async () => {
+    // 選択肢の先頭（人）を選ぶ AutoChooser で回す
     const engine = setup('life', 'earth');
     await startCycle(engine);
 
-    assert.deepEqual(engine.state.players.P1.minions, { human: 2, angel: 2, wraith: 2, beast: 2 });
+    assert.deepEqual(engine.state.players.P1.minions, { human: 2 }, '選んだ1種族だけ2体');
+
+    // 2サイクル目は、パッシブの+2に加えて**人間自身の増殖**（自分の人の数だけ増える）が乗る
+    await startCycle(engine);
+    assert.deepEqual(engine.state.players.P1.minions, { human: 8 });
   });
 
   it('大地の神にパッシブは無い（④パッシブ能力案は未実装）', async () => {

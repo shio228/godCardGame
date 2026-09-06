@@ -3527,18 +3527,14 @@ export const gods: GodDef[] = [
         kind: 'triggered',
         active: 'always',
         when: { on: 'cycleStart' },
-        effect: {
-          t: 'seq',
-          of: [
-            { t: 'createMinion', species: 'human', count: 2 },
-            { t: 'createMinion', species: 'angel', count: 2 },
-            { t: 'createMinion', species: 'wraith', count: 2 },
-            { t: 'createMinion', species: 'beast', count: 2 },
-          ],
-        },
+        effect: { t: 'createMinion', species: { t: 'choose', chooser: { t: 'self' } }, count: 2 },
       },
     ],
-    note: 'テスト仕様「ターン開始時ドロー前に全種2体生成」。ドローフェイズより前に発火する必要があるため、cycleStart の中でも順序指定が要る（フェイズ内順序はエンジン側の課題）。',
+    note:
+      'サイクル開始時に**1種類を選んで2体**生成する（企画側の調整・2026-09-06）。' +
+      '以前は「全種2体（計8体）」で、これが生命の勝率を押し上げていた。' +
+      'ドローフェイズより前に発火する必要があるため cycleStart に置いている' +
+      '（フェイズ内順序はエンジン側の課題）。',
   },
   {
     id: 'creation',

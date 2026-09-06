@@ -10,20 +10,35 @@
  * 全部を賢くするのが目的ではなく、**「特殊勝利を狙う打ち手」を作って
  * ランダムとの差を数字で見る**のが目的なので、効く2か所に絞っている。
  *
- * ## なぜ「1手先読み」ではなく「そのカードを試し解決する」のか
+ * ## 測り方: 「積んだ時点」と「解決後」の両方を見る
  *
  * このゲームはプレイしてもカードはスタックに乗るだけで、効果は解決フェイズまで起きない。
- * 「1手指して盤面を見る」式の先読みはほとんど何も見えない（動くのは onPlay と
- * 炎天・豪雨くらい）。そこで**複製した盤面でそのカードを最後まで解決してから測る**。
- * スタックの絡み（相手に上から乗せられる・打ち消される）は無視するが、
- * カード単体の働きは正しく測れる。
+ * かといって**そのカードだけを即解決して測ると、スタックに積んで価値が出るものが0点になる**。
+ * 「詠唱の極致（スタックの詠唱が30）」のようにスタック上でしか成立しない条件は、
+ * 解決した瞬間に消えてしまうからで、これが原因で海の打ち手は
+ * 「打てるのにパス」を繰り返していた（2026-09-06 のテストプレイで発覚）。
+ *
+ * そこで候補ごとに複製した盤面で:
+ *
+ *   ① その手を打つ（瞬発ならその場で解決される）→ **スタックに載った状態**で測る
+ *   ② そのまま解決フェイズを回す（スタックを全部解決）→ **解決後**で測る
+ *
+ * 勝利条件の進捗は①と②の**良い方**を採る（条件は成立した瞬間に誘発するので、
+ * どちらかの時点で満たせば勝てる）。ライフは②で測る（実際に通ったダメージ）。
+ *
+ * ## パスも同じ土俵で評価する
+ *
+ * 「何も打たずにスタックが解決したらどうなるか」を1つの候補として同じ手順で測り、
+ * **それより良い手が無ければパスする**。パスはそのフェイズ中ずっとパスになる不可逆な選択なので、
+ * 固定のしきい値と比べるのではなく、実際に回して比べる。
  *
  * ## 測っているもの
  *
- *   相手のライフの減り  +1.0 / 点
- *   自分のライフの増減  +selfLifeWeight / 点
- *   勝利条件の進捗      +objectiveWeight / (0〜1の達成度の合計)
- *   勝敗が決まるなら    ±1000
+ *   相手のライフの減り        +1.0 / 点
+ *   自分のライフの増減        +selfLifeWeight / 点
+ *   自分の勝利条件の進捗      +objectiveWeight / (0〜1の達成度の合計)
+ *   **相手の勝利条件の進捗**  −opponentWeight / 同上（妨害を評価する）
+ *   勝敗が決まるなら          ±1000
  *
  * 進捗は `progress.ts` が勝利条件のデータ（`cond`）から直接計算する。
  * AI 側に「詠唱を貯めろ」「ミニオンを並べろ」といった知識は一切書いていない。
@@ -46,12 +61,13 @@ import {
   performAlternativePlay,
   play,
   playChoices,
+  resolvePhase,
   topCtx,
   type PlayChoice,
 } from './flow';
 import { hiddenObjectives, revealedObjectives } from './objectives';
 import { objectiveScore } from './progress';
-import { opponentOf, snapshot } from './state';
+import { opponentOf, snapshot, type StackItem } from './state';
 
 export interface GreedyOptions {
   /** 勝利条件の進捗1.0ぶんを、相手ライフ何点ぶんと見るか */
@@ -60,7 +76,12 @@ export interface GreedyOptions {
   selfLifeWeight?: number;
   /** 伏せてある勝利条件の進捗をどれだけ見るか（0〜1） */
   hiddenWeight?: number;
-  /** これを下回る手しか無ければパスする */
+  /**
+   * **相手**の勝利条件の進捗をどれだけ嫌うか（妨害の重み）。
+   * 相手の伏せ札は見えないので、公開済みのぶんだけを見る。
+   */
+  opponentWeight?: number;
+  /** パスの点に足す下駄。既定0で「パスと同点なら打つ」。上げるほど打たなくなる */
   passThreshold?: number;
   /** 1回の判断で試す候補の上限（先頭から。手札が多いときの打ち切り） */
   maxCandidates?: number;
@@ -68,18 +89,28 @@ export interface GreedyOptions {
   fallback?: Chooser;
   /** 試し解決に使う予算（無限ループ検出） */
   budget?: number;
+  /**
+   * 試し打ちのあと、どこまで回して測るか。
+   *   'item'  … 打った1枚だけを解決する（相手のスタックには触らない）
+   *   'stack' … 解決フェイズをそのまま回す（相手の項目も解決される）
+   */
+  rollout?: 'item' | 'stack';
 }
 
 interface Measured {
   selfLife: number;
   oppLife: number;
   objective: number;
+  /** 相手の公開済み勝利条件の進捗（妨害の評価に使う） */
+  oppObjective: number;
 }
 
 export class GreedyChooser implements Chooser {
   private readonly objectiveWeight: number;
   private readonly selfLifeWeight: number;
   private readonly hiddenWeight: number;
+  private readonly opponentWeight: number;
+  private readonly rollout: 'item' | 'stack';
   private readonly passThreshold: number;
   private readonly maxCandidates: number;
   private readonly budget: number;
@@ -89,6 +120,8 @@ export class GreedyChooser implements Chooser {
     this.objectiveWeight = opts.objectiveWeight ?? 30;
     this.selfLifeWeight = opts.selfLifeWeight ?? 0.5;
     this.hiddenWeight = opts.hiddenWeight ?? 0.5;
+    this.opponentWeight = opts.opponentWeight ?? 15;
+    this.rollout = opts.rollout ?? 'stack';
     this.passThreshold = opts.passThreshold ?? 0;
     this.maxCandidates = opts.maxCandidates ?? 12;
     this.budget = opts.budget ?? 3000;
@@ -175,62 +208,92 @@ export class GreedyChooser implements Chooser {
     }
     if (candidates.length === 0) return [];
 
-    const n = Math.min(candidates.length, this.maxCandidates);
+    // パス（何も打たずにスタックが解決したら）を基準線にする
+    const passScore = (await this.scoreCandidate(engine, player)) ?? 0;
 
+    const n = Math.min(candidates.length, this.maxCandidates);
     let bestIndex = -1;
-    let bestScore = this.passThreshold;
+    let bestScore = passScore + this.passThreshold;
     for (let i = 0; i < n; i++) {
       const score = await this.scoreCandidate(engine, player, i);
       if (score === undefined) continue;
-      if (bestIndex < 0 ? score > this.passThreshold : score > bestScore) {
+      // **同点ならプレイする。** パスはそのフェイズ中ずっとパスになる不可逆な選択なので、
+      // 損でないかぎり打つ。強さは同等（AI同士192戦で 53.6%）だが、
+      // 「打てるのに何もしない」が減って動きが自然になる
+      if (score >= bestScore) {
         bestIndex = i;
         bestScore = score;
       }
     }
-    if (bestIndex < 0) return []; // どれも得にならない → パス
+    if (bestIndex < 0) return []; // パスより悪い手しか無い
     return [req.options[bestIndex]!.value];
   }
 
-  /** 候補を1つ、複製した盤面で実際にプレイ＆解決して点を付ける */
-  private async scoreCandidate(engine: Engine, player: PlayerId, index: number): Promise<number | undefined> {
+  /**
+   * 候補を1つ、複製した盤面で試して点を付ける。`index` を省くと**パス**の評価。
+   *
+   * 手を打ったあと「スタックに載った状態」で1回測り、
+   * そのまま解決フェイズを回して「解決後」でもう1回測る。
+   * 勝利条件の進捗は**良い方**を採る（成立した瞬間に誘発するので、どちらかで満たせば勝ち）。
+   */
+  private async scoreCandidate(engine: Engine, player: PlayerId, index?: number): Promise<number | undefined> {
     const sb = this.sandbox(engine);
     const before = await this.measure(sb, player);
-    // 複製した盤面で同じ選択肢を作り直す（同じ状態・同じ手順なので並びは一致する）
-    const options = await playChoices(sb, player);
-    const choice = options[index];
-    if (!choice) return undefined;
+    let played: StackItem | undefined;
 
-    try {
-      if (choice.kind === 'card') {
-        const item = await play(sb, player, choice.card);
-        const stillOnStack = sb.state.stacks.some((st) => st.items.some((x) => x.uid === item.uid));
-        if (stillOnStack && !sb.state.winner) {
-          await resolveStackItem(topCtx(sb, player), item, false);
-          await drainTriggers(sb);
-        }
-      } else {
-        await performAlternativePlay(sb, player, choice.mod);
+    if (index !== undefined) {
+      // 複製した盤面で同じ選択肢を作り直す（同じ状態・同じ手順なので並びは一致する）
+      const options = await playChoices(sb, player);
+      const choice = options[index];
+      if (!choice) return undefined;
+      try {
+        if (choice.kind === 'card') played = await play(sb, player, choice.card);
+        else await performAlternativePlay(sb, player, choice.mod);
+      } catch {
+        // 試し打ちで落ちる手は選ばない（本番のエンジンには影響しない）
+        return undefined;
       }
-    } catch {
-      // 試し打ちで落ちる手は選ばない（本番のエンジンには影響しない）
-      return undefined;
     }
 
+    // ① スタックに載った時点。詠唱など「スタック上でしか成立しない条件」はここでしか見えない
+    const onStack = await this.measure(sb, player);
+
+    // ② 解決したら。ダメージ・盤面の変化はここで出る
+    try {
+      if (!sb.state.winner) {
+        if (this.rollout === 'stack') {
+          await resolvePhase(sb);
+        } else if (played) {
+          const still = sb.state.stacks.some((st) => st.items.some((x) => x.uid === played.uid));
+          if (still) await resolveStackItem(topCtx(sb, player), played, false);
+        }
+        await drainTriggers(sb);
+      }
+    } catch {
+      return undefined;
+    }
     const after = await this.measure(sb, player);
+
+    const objectiveGain = Math.max(onStack.objective, after.objective) - before.objective;
+    const oppGain = Math.max(onStack.oppObjective, after.oppObjective) - before.oppObjective;
     let score =
       (before.oppLife - after.oppLife) +
       (after.selfLife - before.selfLife) * this.selfLifeWeight +
-      (after.objective - before.objective) * this.objectiveWeight;
+      objectiveGain * this.objectiveWeight -
+      oppGain * this.opponentWeight;
     if (sb.state.winner === player) score += 1000;
     else if (sb.state.winner !== undefined) score -= 1000;
     return score;
   }
 
   private async measure(engine: Engine, player: PlayerId): Promise<Measured> {
+    const opp = opponentOf(player);
     return {
       selfLife: engine.state.players[player].life,
-      oppLife: engine.state.players[opponentOf(player)].life,
+      oppLife: engine.state.players[opp].life,
       objective: await objectiveScore(engine, player, this.hiddenWeight),
+      // 相手の伏せ札は見えないので、公開済みのぶんだけ（hiddenWeight = 0）
+      oppObjective: await objectiveScore(engine, opp, 0),
     };
   }
 

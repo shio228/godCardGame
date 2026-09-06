@@ -323,7 +323,8 @@ export async function resolve(e: Effect, ctx: Ctx): Promise<EffectResult> {
     }
 
     case 'counterStack': {
-      const items = await resolveStack(e.target, ctx);
+      // 解決中の項目はもうスタックから出せない（打ち消しも間に合わない）
+      const items = await resolveStack(e.target, ctx, { excludeResolving: true });
       for (const it of items) {
         removeFromStack(ctx, it);
         if (it.card) s.players[it.card.owner].zones.graveyard[0]!.push(it.card);
@@ -377,7 +378,9 @@ export async function resolve(e: Effect, ctx: Ctx): Promise<EffectResult> {
     }
 
     case 'moveStackToZone': {
-      const items = await resolveStack(e.item, ctx);
+      // **解決中の項目はスタックから出せない**（企画側判断・2026-09-06）。
+      // これが無いと「自分自身を手札に戻して打ち直す」が無限に回る
+      const items = await resolveStack(e.item, ctx, { excludeResolving: true });
       const dest = await resolveZonePile(e.to, ctx);
       for (const it of items) {
         removeFromStack(ctx, it);

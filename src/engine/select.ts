@@ -23,7 +23,7 @@ import type {
   Keyword,
 } from '../rules/types';
 import type { Option } from './chooser';
-import { lookupOpt, pool, state, type Ctx } from './context';
+import { logLine, lookupOpt, pool, state, type Ctx } from './context';
 import { BindingError, RuleError, unreachable } from './errors';
 import { isTargetableEntity, isTargetableItem } from './continuous';
 import {
@@ -253,7 +253,33 @@ export function scopeItems(ctx: Ctx, scope: 'thisStack' | 'allStacks' | undefine
   return st ? [...st.items] : [];
 }
 
-export async function resolveStack(sel: StackSel, ctx: Ctx): Promise<StackItem[]> {
+export interface StackSelOptions {
+  /**
+   * **解決中の項目を候補から外す**（企画側判断・2026-09-06）。
+   *
+   * 解決中のカードはまだスタック上にあるので、放っておくと
+   * 「自分自身を手札に戻す → 手札が減らないまま打ち直す」が無限に回る
+   * （ループ・ザ・ループ / 熟達した跳躍）。スタックから出す効果はこれを立てる。
+   */
+  excludeResolving?: boolean;
+}
+
+export async function resolveStack(
+  sel: StackSel,
+  ctx: Ctx,
+  opts: StackSelOptions = {},
+): Promise<StackItem[]> {
+  const picked = await resolveStackInner(sel, ctx, opts);
+  if (!opts.excludeResolving) return picked;
+  const out = picked.filter((it) => !ctx.engine.resolving.has(it.uid));
+  // 黙って減らさない。何が外れたかはログに出す
+  for (const it of picked) {
+    if (ctx.engine.resolving.has(it.uid)) logLine(ctx, `${itemName(ctx, it)} は解決中なのでスタックから動かせない`);
+  }
+  return out;
+}
+
+async function resolveStackInner(sel: StackSel, ctx: Ctx, opts: StackSelOptions): Promise<StackItem[]> {
   switch (sel.t) {
     case 'this': {
       if (!ctx.item) throw new RuleError("StackSel 'this' だが、この効果はスタック項目に紐づいていない");
@@ -272,7 +298,7 @@ export async function resolveStack(sel: StackSel, ctx: Ctx): Promise<StackItem[]
     }
     case 'above':
     case 'below': {
-      const base = (await resolveStack(sel.of, ctx))[0];
+      const base = (await resolveStackInner(sel.of, ctx, opts))[0];
       if (!base) return [];
       const items = scopeItems(ctx, undefined);
       const idx = items.findIndex((x) => x.uid === base.uid);
@@ -302,6 +328,7 @@ export async function resolveStack(sel: StackSel, ctx: Ctx): Promise<StackItem[]
       for (const it of items) {
         if (!(await matchStack(it, sel.filter, ctx))) continue;
         if (!(await isTargetableItem(ctx, it))) continue;
+        if (opts.excludeResolving && ctx.engine.resolving.has(it.uid)) continue;
         cands.push(it);
       }
       const count = await evalValue(sel.count, ctx);
