@@ -177,8 +177,19 @@ describe('吹雪', () => {
   });
 
   it('天候ダメージは「与えた側」を持たない — 与ダメ修正は乗らず、被ダメ修正だけ乗る', async () => {
-    // 大地の「攻勢」は与ダメ+1／被ダメ+1。吹雪の5点には被ダメ分だけが乗って6になる
-    const engine = setup('blizzard', { p2God: 'earth' });
+    // P2 に「与ダメ+1」と「被ダメ+1」を両方与える。
+    // 吹雪の5点は与えた側がいないので、乗るのは被ダメ分だけ＝6点になる
+    const engine = setup('blizzard');
+    await grant(engine, 'P2', {
+      t: 'grantContinuous',
+      duration: 'thisGame',
+      mod: { t: 'damageDelta', amount: 1, who: { t: 'self' }, direction: 'dealt' },
+    });
+    await grant(engine, 'P2', {
+      t: 'grantContinuous',
+      duration: 'thisGame',
+      mod: { t: 'damageDelta', amount: 1, who: { t: 'self' }, direction: 'taken' },
+    });
     await endTurn(engine);
     assert.equal(engine.state.players.P1.life, 25);
     assert.equal(engine.state.players.P2.life, 24);

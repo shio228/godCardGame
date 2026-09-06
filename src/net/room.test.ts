@@ -147,6 +147,41 @@ describe('対戦', () => {
     assert.ok(end.result!.winner === 'P1' || end.result!.winner === 'P2');
   });
 
+  it('AI の神は毎回同じにならない（先頭固定にしない）', async () => {
+    const { svc } = service();
+    const gods = new Set<string>();
+    for (let i = 0; i < 30; i++) {
+      const snap = await svc.handle({ t: 'create', name: 'あなた', deck: { preset: 'earth' }, vsAi: true });
+      const ai = snap.seats.find((x) => x.ai)!;
+      assert.notEqual(ai.god, 'earth', '自分と同じ神は選ばない');
+      gods.add(ai.god!);
+    }
+    assert.ok(gods.size >= 2, `30回作って ${[...gods].join(',')} しか出ていない`);
+  });
+
+  it('AI のデッキを指名できる', async () => {
+    const { svc } = service();
+    const snap = await svc.handle({
+      t: 'create',
+      name: 'あなた',
+      deck: { preset: 'earth' },
+      vsAi: true,
+      aiDeck: { preset: 'sky' },
+    });
+    const ai = snap.seats.find((x) => x.ai)!;
+    assert.equal(ai.god, 'sky');
+    assert.equal(ai.deckName, '空天候');
+  });
+
+  it('AI に自分と同じ神は指名できない', async () => {
+    const { svc } = service();
+    await assert.rejects(
+      () =>
+        svc.handle({ t: 'create', name: 'あなた', deck: { preset: 'earth' }, vsAi: true, aiDeck: { preset: 'earth' } }),
+      /同じ神同士/,
+    );
+  });
+
   it('AIと1人でも最後まで打てる', async () => {
     const { svc } = service();
     const { room, p1 } = await openRoom(svc, { vsAi: true });

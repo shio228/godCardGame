@@ -10,6 +10,7 @@ import { samplePool } from '../rules/cards.sample';
 import { AutoChooser, ScriptedChooser } from './chooser';
 import { Scope, type Ctx } from './context';
 import { dealDamage } from './damage';
+import { drainTriggers } from './events';
 import { evalValue } from './value';
 import { resolve, resolveTop } from './effects';
 import { createEngine, endTurn, play, putInHand, putOnDeck, resolvePhase, startCycle, topCtx } from './flow';
@@ -121,24 +122,31 @@ describe('ダメージパイプライン', () => {
 // ============================================================
 
 describe('NamedAction', () => {
-  it('斬撃: 3点 + 大地の攻勢+1 = 4点', async () => {
+  it('斬撃: 3点', async () => {
     const engine = setup('earth', 'sea');
     await resolveTop({ t: 'performAction', action: 'earth/slash' }, topCtx(engine, 'P1'));
-    assert.equal(engine.state.players.P2.life, 26);
+    assert.equal(engine.state.players.P2.life, 27);
   });
 
-  it('刺突: 1点×2回、それぞれに攻勢+1が乗る = 4点', async () => {
+  it('刺突: 1点を2回（合計2点。企画書「基本ルール」の 1+1）', async () => {
     const engine = setup('earth', 'sea');
     await resolveTop({ t: 'performAction', action: 'earth/thrust' }, topCtx(engine, 'P1'));
-    assert.equal(engine.state.players.P2.life, 26);
+    assert.equal(engine.state.players.P2.life, 28);
+  });
+
+  it('刺突にもサイクルボーナスが乗る（2サイクル目なら 3+3）', async () => {
+    // 企画書 大地の神設定「刺突は通常1点を2回 … サイクルダメージボーナスなどで伸びる」
+    const engine = setup('earth', 'sea', { cycle: 2 });
+    await resolveTop({ t: 'performAction', action: 'earth/thrust' }, topCtx(engine, 'P1'));
+    assert.equal(engine.state.players.P2.life, 24);
   });
 
   it('打撃: 軽減されない', async () => {
     const engine = setup('earth', 'sea');
     engine.state.players.P2.status.reduction = 10;
     await resolveTop({ t: 'performAction', action: 'earth/strike' }, topCtx(engine, 'P1'));
-    // 2 + 攻勢1 = 3、軽減10 を無視して通る
-    assert.equal(engine.state.players.P2.life, 27);
+    // 2点。軽減10 を無視して通る
+    assert.equal(engine.state.players.P2.life, 28);
   });
 
   it('コンビネーション: 戦技を2回、同じものは選ばない', async () => {
@@ -149,7 +157,8 @@ describe('NamedAction', () => {
       topCtx(engine, 'P1'),
     );
     // 斬撃4 + 刺突(1+1)*2=4 → 8
-    assert.equal(engine.state.players.P2.life, 22);
+    // 斬撃3 + 刺突(1+1) = 5点
+    assert.equal(engine.state.players.P2.life, 25);
   });
 
   it('攻撃指令: xは選んだ種族の体数。魔獣がいればダメージボーナスが乗る', async () => {
@@ -170,6 +179,27 @@ describe('NamedAction', () => {
 // ============================================================
 // ミニオン
 // ============================================================
+
+describe('装備（トークン）の誘発', () => {
+  it('「このカードが生成されたとき」は自分自身にだけ誘発する', async () => {
+    // ヴァーミリオンピアス（槍）は生成されたときに刺突を行う。
+    // 装備したあとに**別の装備**を作っても、槍は刺突しない
+    const engine = setup('earth', 'sea');
+    const ctx = topCtx(engine, 'P1');
+
+    await resolveTop({ t: 'createToken', equip: true, token: 'earth/spear' }, ctx);
+    await drainTriggers(engine);
+    assert.equal(engine.state.players.P2.life, 28, '槍の生成で 1+1 の刺突');
+
+    await resolveTop({ t: 'createToken', equip: true, token: 'earth/sword' }, ctx);
+    await drainTriggers(engine);
+    assert.equal(engine.state.players.P2.life, 28, '剣を作っただけでは刺突しない');
+
+    await resolveTop({ t: 'createToken', equip: true, token: 'earth/spear' }, ctx);
+    await drainTriggers(engine);
+    assert.equal(engine.state.players.P2.life, 26, '2本目の槍を作れば、その槍が刺突する');
+  });
+});
 
 describe('ミニオン', () => {
   it('死霊: 死亡した数だけ相手にダメージ。軽減されずサイクルボーナスも乗らない', async () => {
@@ -295,17 +325,26 @@ describe('常在', () => {
 // ============================================================
 
 describe('サイクル開始', () => {
-  it('生命の神はサイクル開始時に全種2体、大地の神はシールド5を得る', async () => {
+  it('生命の神はサイクル開始時に全種2体を得る', async () => {
     const engine = setup('life', 'earth');
     await startCycle(engine);
 
     assert.deepEqual(engine.state.players.P1.minions, { human: 2, angel: 2, wraith: 2, beast: 2 });
-    assert.equal(engine.state.players.P2.status.shield, 5);
+  });
+
+  it('大地の神にパッシブは無い（④パッシブ能力案は未実装）', async () => {
+    const engine = setup('earth', 'sea');
+    await startCycle(engine);
+    assert.equal(engine.state.players.P1.status.shield, 0, 'シールド5（難攻不落）は入れない');
   });
 
   it('シールドはターン終了時に0に戻る', async () => {
     const engine = setup('earth', 'sea');
     await startCycle(engine);
+    await resolveTop(
+      { t: 'gainStatus', player: { t: 'self' }, kind: 'shield', amount: 5, duration: 'thisTurn' },
+      topCtx(engine, 'P1'),
+    );
     assert.equal(engine.state.players.P1.status.shield, 5);
     await endTurn(engine);
     assert.equal(engine.state.players.P1.status.shield, 0);

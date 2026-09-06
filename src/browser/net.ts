@@ -116,8 +116,8 @@ async function post(action: ClientAction): Promise<RoomSnapshot> {
 }
 
 export const api = {
-  create: (name: string, deck: DeckChoice, vsAi: boolean): Promise<RoomSnapshot> =>
-    post({ t: 'create', name, deck, vsAi }),
+  create: (name: string, deck: DeckChoice, vsAi: boolean, aiDeck?: DeckChoice): Promise<RoomSnapshot> =>
+    post({ t: 'create', name, deck, vsAi, ...(aiDeck ? { aiDeck } : {}) }),
 
   join: (room: string, name: string): Promise<RoomSnapshot> => post({ t: 'join', room, name }),
 

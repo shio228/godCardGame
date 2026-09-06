@@ -21,7 +21,7 @@ import type { CardPool, PlayerId } from '../rules/types';
 import type { Chooser, ConfirmRequest, NumberRequest, OrderRequest, SelectRequest } from '../engine/chooser';
 import type { Engine } from '../engine/context';
 import { EngineError } from '../engine/errors';
-import { createEngine, runGame, startGame } from '../engine/flow';
+import { createEngine, PLAY_PROMPT, runGame, startGame } from '../engine/flow';
 import type { GameSetup, RecordedChoice } from '../engine/replay';
 import { playerView, type PlayerView } from '../engine/view';
 import type { PendingRequest } from './protocol';
@@ -90,7 +90,16 @@ class ResumeChooser implements Chooser {
     const rec = this.next('select', req.player, req.prompt);
     if (!rec) {
       this.stop(
-        { t: 'select', player: req.player, kind: req.kind, prompt: req.prompt, options: labelsOf(req.options), min: req.min, max: req.max },
+        {
+          t: 'select',
+          player: req.player,
+          kind: req.kind,
+          prompt: req.prompt,
+          options: labelsOf(req.options),
+          min: req.min,
+          max: req.max,
+          ...(req.prompt === PLAY_PROMPT ? { play: true } : {}),
+        },
         { t: 'select', req: req as SelectRequest<unknown> },
       );
     }

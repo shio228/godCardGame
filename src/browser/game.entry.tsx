@@ -207,6 +207,17 @@ function usePolling(
 
 type Send = (fn: () => Promise<RoomSnapshot>, keep?: (s: RoomSnapshot) => Session | undefined) => Promise<void>;
 
+/**
+ * 同梱デッキ。部屋に入る前はサーバに聞けないので、ここに名前だけ持つ
+ * （中身はサーバ側の `decks/*.txt`。ロビーでは `snap.presets` を使う）。
+ */
+const PRESETS = [
+  { name: 'earth', label: '大地アグロ' },
+  { name: 'sea', label: '海コントロール' },
+  { name: 'sky', label: '空天候' },
+  { name: 'life', label: '生命展開' },
+];
+
 const seatOf = (s: RoomSnapshot): Session | undefined =>
   s.you ? { room: s.room, seat: s.you.seat, token: s.you.token } : undefined;
 
@@ -228,6 +239,8 @@ function Entrance({
   const [preset, setPreset] = useState('earth');
   const [text, setText] = useState('');
   const [vsAi, setVsAi] = useState(false);
+  // 空文字＝おまかせ（自分と違う神からランダム）
+  const [aiPreset, setAiPreset] = useState('');
   const [recent, setRecent] = useState<Session[]>(() => recentSeats());
 
   const deck = (): DeckChoice => (text.trim() === '' ? { preset } : { text });
@@ -274,10 +287,11 @@ function Entrance({
         <label className="field">
           <span>デッキ</span>
           <select value={preset} onChange={(e) => setPreset(e.target.value)} disabled={text.trim() !== ''}>
-            <option value="earth">大地アグロ</option>
-            <option value="sea">海コントロール</option>
-            <option value="sky">空天候</option>
-            <option value="life">生命展開</option>
+            {PRESETS.map((p) => (
+              <option value={p.name} key={p.name}>
+                {p.label}
+              </option>
+            ))}
           </select>
         </label>
         <label className="field">
@@ -293,10 +307,34 @@ function Entrance({
           <input type="checkbox" checked={vsAi} onChange={(e) => setVsAi(e.target.checked)} />
           <span>AI と対戦する（1人で始める）</span>
         </label>
+        {vsAi ? (
+          <label className="field">
+            <span>AI のデッキ</span>
+            <select value={aiPreset} onChange={(e) => setAiPreset(e.target.value)}>
+              <option value="">おまかせ（自分と違う神からランダム）</option>
+              {PRESETS.filter((p) => p.name !== preset || text.trim() !== '').map((p) => (
+                <option value={p.name} key={p.name}>
+                  {p.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
         <button
           className="primary"
           disabled={busy}
-          onClick={() => void send(() => api.create(name.trim() === '' ? '名無しの神' : name, deck(), vsAi), seatOf)}
+          onClick={() =>
+            void send(
+              () =>
+                api.create(
+                  name.trim() === '' ? '名無しの神' : name,
+                  deck(),
+                  vsAi,
+                  vsAi && aiPreset !== '' ? { preset: aiPreset } : undefined,
+                ),
+              seatOf,
+            )
+          }
         >
           部屋を作る
         </button>

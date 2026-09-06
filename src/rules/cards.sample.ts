@@ -3496,25 +3496,13 @@ export const gods: GodDef[] = [
     name: '大地の神',
     actions: ['earth/slash', 'earth/thrust', 'earth/strike'],
     tokens: ['earth/sword', 'earth/spear', 'earth/hammer', 'earth/armor_obsidian', 'earth/armor_mantle'],
-    passives: [
-      {
-        kind: 'continuous',
-        active: 'always',
-        mod: { t: 'damageDelta', amount: 1, who: { t: 'self' }, direction: 'dealt' },
-      },
-      {
-        kind: 'continuous',
-        active: 'always',
-        mod: { t: 'damageDelta', amount: 1, who: { t: 'self' }, direction: 'taken' },
-      },
-      {
-        kind: 'triggered',
-        active: 'always',
-        when: { on: 'cycleStart' },
-        effect: { t: 'gainStatus', player: { t: 'self' }, kind: 'shield', amount: 5, duration: 'thisTurn' },
-      },
-    ],
-    note: '①攻勢＝与ダメ/被ダメ+1 ②難攻不落＝ターン開始時シールド5。企画書④パッシブ能力案より。',
+    passives: [],
+    note:
+      '**パッシブ無し。** 企画書「基本システム」④パッシブ能力案（①攻勢＝与ダメ/被ダメ+1、' +
+      '②難攻不落＝ターン開始時シールド5）は案の段階なので実装しない（2026-09-06 に取り消し）。' +
+      '①が入っていたせいで刺突が 1+1 ではなく 2+2 に、ブレイジングラッシュの自傷が 2点ではなく 4点になっていた。' +
+      'サイクルダメージボーナス（ダメージはサイクル数ぶん増える）は企画書「基本システム」の確定ルールで、' +
+      'ダメージパイプライン段2に実装済み。パッシブで打点を代用しない。',
   },
   {
     id: 'sea',

@@ -143,7 +143,7 @@ export class RoomService {
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
-    if (doc.vsAi) doc.seats.P2 = aiSeat(this.index, deck.god);
+    if (doc.vsAi) doc.seats.P2 = aiSeat(this.index, deck.god, a.aiDeck);
 
     const stored: StoredRoom = { doc, views: {} };
     // AI 相手なら席がもう揃っている。作った時点で始める（待つ相手がいない）
@@ -356,12 +356,29 @@ function seatOf(name: string, token: string, deck: ParsedDeck): SeatDoc {
 }
 
 /** AI の席。**相手と違う神**を選ぶ（同神対決はルール上起こらない） */
-function aiSeat(pool: PoolIndex, avoid: God): SeatDoc {
-  for (const preset of PRESET_NAMES) {
-    const deck = parseDeckList(DECK_TEXTS[preset]!, pool, { name: preset });
-    if (deck.god !== avoid) return { name: 'AI', token: newToken(), ai: true, ready: true, ...deckFields(deck) };
+function aiSeat(pool: PoolIndex, avoid: God, choice?: DeckChoice): SeatDoc {
+  const seat = (deck: ParsedDeck): SeatDoc => ({
+    name: `AI（${deck.name}）`,
+    token: newToken(),
+    ai: true,
+    ready: true,
+    ...deckFields(deck),
+  });
+
+  if (choice) {
+    const deck = resolveDeck(pool, choice);
+    // 同神対決はルール上起こらないので、指定されても断る
+    if (deck.god === avoid) throw new RoomError(`AI にも ${avoid} は選べません（同じ神同士は対戦できない）`);
+    return seat(deck);
   }
-  throw new RoomError(`${avoid} 以外のデッキが無い`);
+
+  // 指定が無ければ**毎回ランダム**。先頭固定だと相手の神がいつも同じになる
+  const usable = PRESET_NAMES.map((name) => parseDeckList(DECK_TEXTS[name]!, pool, { name })).filter(
+    (d) => d.god !== avoid,
+  );
+  const pick = usable[randomInt() % usable.length];
+  if (!pick) throw new RoomError(`${avoid} 以外のデッキが無い`);
+  return seat(pick);
 }
 
 function other(seat: PlayerId): PlayerId {

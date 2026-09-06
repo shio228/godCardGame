@@ -52,6 +52,11 @@ interface TriggerSource {
   requireIncrease?: boolean;
   /** 付与時に写し取った発生源の snapshot。イベント由来の暗黙束縛に混ぜて渡す */
   extraBindings?: Record<string, Bound>;
+  /**
+   * この能力を持っているトークンの uid（装備の能力のときだけ入る）。
+   * 「このカードが生成されたとき」を**そのトークン自身**に限るために要る。
+   */
+  tokenUid?: string;
 }
 
 function fromAbilities(
@@ -61,6 +66,7 @@ function fromAbilities(
   origin: string,
   keyBase: string,
   item?: StackItem,
+  tokenUid?: string,
 ): TriggerSource[] {
   const out: TriggerSource[] = [];
   abilities.forEach((ab, i) => {
@@ -76,6 +82,7 @@ function fromAbilities(
       if (ab.optional !== undefined) src.optional = ab.optional;
       if (ab.limit !== undefined) src.limit = ab.limit;
       if (item) src.item = item;
+      if (tokenUid !== undefined) src.tokenUid = tokenUid;
       out.push(src);
       return;
     }
@@ -115,7 +122,7 @@ function gatherSources(engine: Engine): TriggerSource[] {
     for (const tk of s.players[pid].tokens) {
       if (!tk.equipped) continue;
       const def = engine.pool.token(tk.defId);
-      out.push(...fromAbilities(def.abilities, 'inField', pid, `装備:${def.name}`, `token:${tk.uid}`));
+      out.push(...fromAbilities(def.abilities, 'inField', pid, `装備:${def.name}`, `token:${tk.uid}`, undefined, tk.uid));
     }
     for (const [sp, n] of Object.entries(s.players[pid].minions)) {
       if (n <= 0) continue;
@@ -231,6 +238,13 @@ async function subjectMatches(engine: Engine, src: TriggerSource, ev: GameEvent)
 
   // 既定: 「このカード自身」 / 自分に起きたこと
   if (ev.itemUid && src.item) return ev.itemUid === src.item.uid;
+  // 装備の能力で、イベントがトークンについてのものなら**そのトークン自身**に限る。
+  // （ヴァーミリオンピアスの「このカードが生成されたとき刺突を行う」が、
+  //   他の装備を作るたびに誘発してしまっていた）
+  if (src.tokenUid !== undefined) {
+    const bound = ev.bindings?.token;
+    if (bound && bound.of === 'token') return bound.value.some((t) => t.uid === src.tokenUid);
+  }
   if (ev.player !== undefined) return ev.player === src.controller;
   return true;
 }

@@ -25,6 +25,12 @@ export interface PendingRequest {
   kind?: ChoiceKind;
   /** select / order のときだけ。選択肢の表示名 */
   options?: string[];
+  /**
+   * 「プレイするカードを選ぶ」か。
+   * 手札を直接押して選べるのはこの選択のときだけ（他の選択でも押せると、
+   * 「手札からn枚選ぶ」の途中で1枚目を押した瞬間に送信されてしまう）。
+   */
+  play?: boolean;
   min?: number;
   max?: number;
 }
@@ -73,7 +79,15 @@ export interface RoomSnapshot {
 }
 
 export type ClientAction =
-  | { t: 'create'; name: string; deck: DeckChoice; vsAi?: boolean; seed?: number }
+  | {
+      t: 'create';
+      name: string;
+      deck: DeckChoice;
+      vsAi?: boolean;
+      /** AI 側のデッキ。省略すると**自分と違う神から毎回ランダムに**選ぶ */
+      aiDeck?: DeckChoice;
+      seed?: number;
+    }
   | { t: 'join'; room: string; name: string }
   | { t: 'deck'; room: string; seat: PlayerId; token: string; deck: DeckChoice }
   | { t: 'ready'; room: string; seat: PlayerId; token: string; ready: boolean }

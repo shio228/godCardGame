@@ -129,9 +129,8 @@ describe('大地', () => {
     setupBoth(engine, 'earth', 'sea');
     await startCycle(engine);
 
-    // 大地の神パッシブ「攻勢」で与ダメ＋1されるので素の値は7
     await resolveTop(
-      { t: 'damage', to: { t: 'player', who: { t: 'opponent' } }, amount: 7, flags: { ignoreCycleBonus: true } },
+      { t: 'damage', to: { t: 'player', who: { t: 'opponent' } }, amount: 8, flags: { ignoreCycleBonus: true } },
       topCtx(engine, 'P1'),
     );
     assert.equal(engine.state.winner, 'P1');

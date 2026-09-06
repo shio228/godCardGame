@@ -47,7 +47,10 @@ export interface BoardProps {
 }
 
 export function Board({ view, pending, busy, waitingNote, onChoose, onSurrender }: BoardProps): JSX.Element {
-  const playable = useMemo(() => new Set(pending?.options ?? []), [pending]);
+  // 手札を直接押して選べるのは「プレイするカードを選ぶ」のときだけ。
+  // 「手札からn枚選ぶ」でも押せるようにすると、1枚目を押した瞬間に送信されて
+  // 選び終わる前に次へ進んでしまう（テラブレイズで発覚）
+  const playable = useMemo(() => new Set(pending?.play === true ? (pending.options ?? []) : []), [pending]);
 
   return (
     <div className="board">

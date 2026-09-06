@@ -246,7 +246,6 @@ describe('公開と先攻決定', () => {
 // ============================================================
 
 describe('誘発型の勝利条件', () => {
-  // 大地の神パッシブ「攻勢」で与えるダメージが＋1されるので、素の値は 1 少なくしてある
   it('公開されていれば成立して勝利する（8点で一撃必殺）', async () => {
     const engine = setup('earth', 'sea', pick('一撃必殺（先行度6）', '詠唱の極致（先行度5）'));
     setupObjectives(engine, 'P1', EARTH_3);
@@ -254,10 +253,10 @@ describe('誘発型の勝利条件', () => {
     await startCycle(engine);
 
     await resolveTop(
-      { t: 'damage', to: { t: 'player', who: { t: 'opponent' } }, amount: 7, flags: { ignoreCycleBonus: true } },
+      { t: 'damage', to: { t: 'player', who: { t: 'opponent' } }, amount: 8, flags: { ignoreCycleBonus: true } },
       topCtx(engine, 'P1'),
     );
-    assert.equal(engine.state.winner, 'P1', '7 +攻勢1 = 8点');
+    assert.equal(engine.state.winner, 'P1', 'ちょうど8点');
   });
 
   it('条件を満たさなければ勝利しない（7点）', async () => {
@@ -267,10 +266,10 @@ describe('誘発型の勝利条件', () => {
     await startCycle(engine);
 
     await resolveTop(
-      { t: 'damage', to: { t: 'player', who: { t: 'opponent' } }, amount: 6, flags: { ignoreCycleBonus: true } },
+      { t: 'damage', to: { t: 'player', who: { t: 'opponent' } }, amount: 7, flags: { ignoreCycleBonus: true } },
       topCtx(engine, 'P1'),
     );
-    assert.equal(engine.state.winner, undefined, '6 +攻勢1 = 7点');
+    assert.equal(engine.state.winner, undefined, '7点では届かない');
   });
 
   it('公開していない条件は成立しない（伏せたままの一撃必殺）', async () => {
