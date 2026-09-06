@@ -27,8 +27,13 @@ import type { Engine, LogEntry } from './context';
 import { EngineError } from './errors';
 import { createEngine, runGame, startGame, type DeckList } from './flow';
 
-/** 記録フォーマットの版。エンジン側の記録内容を変えたら上げる */
-export const RECORD_VERSION = 1;
+/**
+ * 記録フォーマットの版。エンジン側の記録内容を変えたら上げる。
+ *
+ * v2: サイクルを0起点にした（企画書「基本ルール」）。0サイクル目にも
+ *     スタックフェイズがあるので、選択の並びが v1 と噛み合わない。
+ */
+export const RECORD_VERSION = 2;
 
 export class ReplayError extends EngineError {}
 

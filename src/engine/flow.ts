@@ -101,7 +101,7 @@ export { DECK_MIN, DECK_MAX, MAX_COPIES, HAND_LIMIT, OBJECTIVE_MIN } from '../ru
 
 /**
  * サイクル別のドロー枚数（企画書「基本ドロー枚数」）。
- * 0サイクル目の7枚が初期手札。累計は 7/12/18/25/30 で、
+ * **サイクルは0起点**で、0サイクル目に引く7枚が初期手札。累計は 7/12/18/25/30 で、
  * **4サイクル目に30枚デッキを引き切る**ように配分されている。
  */
 export const CYCLE_DRAW: number[] = [7, 5, 6, 7, 5];
@@ -149,16 +149,20 @@ export function validateDeck(engine: Engine, player: PlayerId, cards: string[]):
 }
 
 /**
- * ゲーム開始。デッキを検証してシャッフルし、勝利条件を伏せ、初期手札を配る。
+ * ゲーム開始。デッキを検証してシャッフルし、勝利条件を伏せる。
  * マリガンは企画側で「なし」確定なので存在しない。
  *
- * 初期手札は**0サイクル目のドロー**として扱う（企画書のドロー表がそう定義している）ので、
- * `drawPhase` をそのまま呼んでいる。置換効果 `drawDelta` もここから効く。
+ * **初期手札はここでは配らない。** 企画書のドロー表は初期手札7枚を
+ * 「0サイクル目のドローフェイズ」と定義しているので、7枚は**0サイクル目の中**で引く
+ * （公開特殊勝利条件のオープン → ドロー → スタック…と、他のサイクルと同じ順番で進む）。
+ *
+ * `startCycle` が先頭で +1 するので、開始前は -1 に置く。
+ * この値が外から見えるのは `runGame` に入るまでの一瞬だけで、その間に選択は起きない。
  */
 export async function startGame(engine: Engine, opts: StartGameOptions): Promise<void> {
   const s = engine.state;
-  s.cycle = 0;
-  s.turn = 0;
+  s.cycle = -1;
+  s.turn = -1;
   for (const pid of PLAYERS) {
     const list = opts[pid];
     validateDeck(engine, pid, list.cards);
@@ -168,7 +172,6 @@ export async function startGame(engine: Engine, opts: StartGameOptions): Promise
     shufflePile(s, pile);
     setupObjectives(engine, pid, list.objectives, opts.objectiveMin !== undefined ? { min: opts.objectiveMin } : {});
   }
-  await drawPhase(engine);
 }
 
 /** 降伏は即敗北（企画書「基本ルール」） */
@@ -475,7 +478,7 @@ function isOnStack(s: GameState, uid: string): boolean {
 // ============================================================
 
 /**
- * ①サイクル開始。
+ * ①サイクル開始。**最初のサイクルは0サイクル目**（企画書「基本ルール」）。
  *
  * 公開特殊勝利条件のオープンが先。そこで先攻後攻が決まり、
  * cycleStart の誘発順（先攻 → 後攻）がそれに従うため、順番を入れ替えられない。
@@ -665,7 +668,8 @@ export async function endCycle(engine: Engine): Promise<void> {
   const s = engine.state;
   s.continuous = s.continuous.filter((c) => c.duration !== 'thisCycle' && c.duration !== 'thisTurn');
   s.grantedTriggers = s.grantedTriggers.filter((c) => c.duration !== 'thisCycle' && c.duration !== 'thisTurn');
-  // 2サイクル終了時に書き換え不能な「終末」が発生する
+  // 2サイクル目の終了フェイズに書き換え不能な「終末」が加わる（企画書「基本ルール」）。
+  // サイクルは0起点なので、この比較がそのまま企画書の「2サイクル目」を指す
   if (s.cycle >= 2) s.apocalypse = true;
 }
 

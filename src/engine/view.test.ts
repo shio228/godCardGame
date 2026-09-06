@@ -8,7 +8,7 @@ import { describe, it } from 'node:test';
 import { samplePool } from '../rules/cards.sample';
 import { loadDeck } from '../rules/decks.load';
 import { AutoChooser } from './chooser';
-import { createEngine, play, putInHand, startCycle, startGame, surrender } from './flow';
+import { createEngine, drawPhase, play, putInHand, startCycle, startGame, surrender } from './flow';
 import { playerView } from './view';
 import type { Engine } from './context';
 
@@ -22,6 +22,9 @@ async function started(): Promise<Engine> {
     chooser: new AutoChooser(),
   });
   await startGame(engine, { P1: loadDeck('earth'), P2: loadDeck('sky') });
+  // 初期手札7枚は「0サイクル目のドロー」なので、そこまで進めてから見る
+  await startCycle(engine);
+  await drawPhase(engine);
   return engine;
 }
 
@@ -41,16 +44,15 @@ describe('ビューに入るもの', () => {
     const engine = await started();
     const v = await playerView(engine, 'P1');
 
-    assert.equal(v.me.hidden?.length, 3);
+    // 0サイクル目の開始フェイズで1つ公開されるので、伏せは残り2つ
+    assert.equal(v.me.hidden?.length, 2);
     assert.ok(v.me.hidden?.every((o) => o.name && o.text));
-    assert.equal(v.opp.hidden, undefined);
-    assert.equal(v.opp.hiddenCount, 3);
-    assert.deepEqual(v.opp.revealed, [], 'まだ公開されていない');
+    assert.equal(v.opp.hidden, undefined, '相手の伏せ札は中身が入らない');
+    assert.equal(v.opp.hiddenCount, 2, '件数だけ見える');
   });
 
   it('公開された勝利条件は両者に見え、達成度も付く', async () => {
-    const engine = await started();
-    await startCycle(engine);
+    const engine = await started(); // 0サイクル目の開始で1つずつ公開されている
     const v = await playerView(engine, 'P1');
 
     assert.equal(v.me.revealed.length, 1);

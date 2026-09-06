@@ -17,6 +17,7 @@ import {
   drawPhase,
   endTurn,
   handLimitFor,
+  endCycle,
   orderPhase,
   performAlternativePlay,
   play,
@@ -86,8 +87,15 @@ function deck(engine: Engine, pid: PlayerId): number {
   return engine.state.players[pid].zones.deck[0]!.length;
 }
 
+/**
+ * ゲームを始めて**0サイクル目のドローまで**進める。
+ * 企画書のドロー表では初期手札7枚が「0サイクル目のドロー」なので、
+ * 「始まった直後」はここまで含む（`startGame` 自体は配らない）。
+ */
 async function startSample(engine: Engine): Promise<void> {
   await startGame(engine, { P1: loadDeck('sea'), P2: loadDeck('earth') });
+  await startCycle(engine);
+  await drawPhase(engine);
 }
 
 // ============================================================
@@ -95,17 +103,62 @@ async function startSample(engine: Engine): Promise<void> {
 // ============================================================
 
 describe('startGame', () => {
-  it('初期手札7枚を配り、デッキをシャッフルする', async () => {
+  it('0サイクル目のドローで7枚配られる（初期手札）', async () => {
     const engine = engineOf(new PassChooser());
-    await startSample(engine);
+    await startGame(engine, { P1: loadDeck('sea'), P2: loadDeck('earth') });
+
+    // 配るのは 0 サイクル目のドローフェイズ。`startGame` の時点では手札は空
+    assert.equal(hand(engine, 'P1'), 0, 'startGame は配らない');
+    // 勝利条件は伏せた状態で3つ（公開はサイクル開始フェイズで起きる）
+    assert.equal(engine.state.players.P1.objectives.length, 3);
+    assert.equal(engine.state.players.P1.revealedObjectives.length, 0);
+
+    await startCycle(engine);
+    await drawPhase(engine);
 
     assert.equal(hand(engine, 'P1'), 7);
     assert.equal(hand(engine, 'P2'), 7);
     assert.equal(deck(engine, 'P1'), DECK_MIN - 7);
-    assert.equal(engine.state.cycle, 0);
-    // 勝利条件は伏せた状態で3つ
-    assert.equal(engine.state.players.P1.objectives.length, 3);
-    assert.equal(engine.state.players.P1.revealedObjectives.length, 0);
+    assert.equal(engine.state.cycle, 0, '最初のサイクルは0サイクル目');
+    assert.equal(engine.state.players.P1.revealedObjectives.length, 1, '0サイクル目にも1つ公開する');
+  });
+
+  it('最初のプレイは0サイクル目・手札7枚（1サイクル目に飛ばさない）', async () => {
+    // 企画書「基本ルール」: 初期手札7枚＝0サイクル目のドロー。
+    // 0サイクル目を丸ごと飛ばすと、最初のプレイが手札12枚（7+5）になってしまう
+    const seen: { cycle: number; hand: number }[] = [];
+    class WatchChooser extends AutoChooser {
+      override async select<T>(req: SelectRequest<T>): Promise<T[]> {
+        if (req.prompt === PLAY_PROMPT) {
+          seen.push({ cycle: engine.state.cycle, hand: hand(engine, req.player) });
+          return [];
+        }
+        return super.select(req);
+      }
+    }
+    const engine = engineOf(new WatchChooser());
+    await startGame(engine, { P1: loadDeck('sea'), P2: loadDeck('earth') });
+    await startCycle(engine);
+    await drawPhase(engine);
+    await stackPhase(engine);
+
+    assert.deepEqual(seen[0], { cycle: 0, hand: 7 }, `最初の選択が ${JSON.stringify(seen[0])} になっている`);
+  });
+
+  it('終末は2サイクル目の終了フェイズに加わる', async () => {
+    const engine = engineOf(new PassChooser());
+    await startGame(engine, { P1: loadDeck('sea'), P2: loadDeck('earth') });
+
+    for (const expected of [false, false, true]) {
+      await startCycle(engine);
+      await endCycle(engine);
+      assert.equal(
+        engine.state.apocalypse,
+        expected,
+        `${engine.state.cycle} サイクル目の終了時に apocalypse=${engine.state.apocalypse}`,
+      );
+    }
+    assert.equal(engine.state.cycle, 2, '0 → 1 → 2 と数える');
   });
 
   it('シャッフルされている（デッキ順が構築順と違う）', async () => {
@@ -363,7 +416,8 @@ describe('runGame', () => {
     const engine = await startWith('earth', 'sky', new AutoChooser());
     const r = await runGame(engine);
     assert.ok(r.winner === 'P1' || r.winner === 'P2', `winner=${r.winner}`);
-    assert.ok(r.cycles >= 1);
+    // サイクルは0起点。30枚デッキなら4サイクル目で引き切るので、それより長引かない
+    assert.ok(r.cycles >= 0 && r.cycles <= 6, `cycles=${r.cycles}`);
   });
 
   it('誰もカードをプレイしなくても引き切りペナルティで決着する（4サイクル決着の強制終了）', async () => {
