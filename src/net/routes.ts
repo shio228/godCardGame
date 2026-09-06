@@ -10,7 +10,7 @@
 import { samplePool } from '../rules/cards.sample';
 import { RoomService, RoomError } from './room';
 import { ResumeError } from './resume';
-import { storeFromEnv } from './store.factory';
+import { StoreConfigError, storeFromEnv } from './store.factory';
 import { json } from './route.version';
 import type { RoomStore } from './store';
 import type { ClientAction, RoomSnapshot } from './protocol';
@@ -27,7 +27,7 @@ export function serviceFromEnv(store?: RoomStore): RoomService {
 }
 
 /** `GET /api/state?room=&seat=&token=` — 保存済みのビューを返す。エンジンは回さない */
-export async function stateRoute(req: Request, svc: RoomService = serviceFromEnv()): Promise<Response> {
+export async function stateRoute(req: Request, svc?: RoomService): Promise<Response> {
   const q = new URL(req.url).searchParams;
   const room = q.get('room');
   if (room === null || room === '') return json({ error: 'room が要る' }, 400);
@@ -35,7 +35,10 @@ export async function stateRoute(req: Request, svc: RoomService = serviceFromEnv
   const seat = q.get('seat');
   const token = q.get('token');
   return run(async () => {
-    const snap = await svc.snapshot(
+    // **サービスの用意も try の中で。** 既定引数にすると本体より先に評価されるので、
+    // 設定不足の例外がここの捕捉をすり抜けて、素のエラーページがそのまま返っていた
+    const service = svc ?? serviceFromEnv();
+    const snap = await service.snapshot(
       room,
       seat === 'P1' || seat === 'P2' ? (seat as PlayerId) : undefined,
       token ?? undefined,
@@ -50,11 +53,12 @@ export async function stateRoute(req: Request, svc: RoomService = serviceFromEnv
 }
 
 /** `POST /api/game` — 操作を1件受ける。**エンジンを回すのはここだけ** */
-export async function gameRoute(req: Request, svc: RoomService = serviceFromEnv()): Promise<Response> {
+export async function gameRoute(req: Request, svc?: RoomService): Promise<Response> {
   if (req.method !== 'POST') return json({ error: 'POST で送る' }, 405);
   return run(async () => {
+    const service = svc ?? serviceFromEnv();
     const action = await parseAction(req);
-    const snap: RoomSnapshot = await svc.handle(action);
+    const snap: RoomSnapshot = await service.handle(action);
     return json(snap, 200);
   });
 }
@@ -82,6 +86,10 @@ async function run(fn: () => Promise<Response>): Promise<Response> {
   try {
     return await fn();
   } catch (e) {
+    if (e instanceof StoreConfigError) {
+      // 保存先が無い。これは設定の問題なので、直し方をそのまま返す
+      return json({ error: `保存先が設定されていません: ${e.message}` }, 500);
+    }
     if (e instanceof RoomError || e instanceof ResumeError) return json({ error: e.message }, 400);
     if (e instanceof Error && /行目|デッキ|勝利条件/.test(e.message)) return json({ error: e.message }, 400);
     const message = e instanceof Error ? `${e.name}: ${e.message}` : String(e);

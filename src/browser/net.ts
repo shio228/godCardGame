@@ -87,13 +87,30 @@ export function forgetSeat(s: Session): void {
 
 export class ApiError extends Error {}
 
+/**
+ * 応答をJSONとして読む。
+ *
+ * **JSONでない応答も来る**（ホスティング側が出す素のエラーページなど）。
+ * そのまま `res.json()` に通すと「Unexpected token ...」という、
+ * 何が起きたか分からないエラーになるので、本文の頭を添えてそのまま見せる。
+ */
+async function readJson(res: Response, where: string): Promise<RoomSnapshot & { error?: string }> {
+  const text = await res.text();
+  try {
+    return JSON.parse(text) as RoomSnapshot & { error?: string };
+  } catch {
+    const head = text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 160);
+    throw new ApiError(`${where} が ${res.status} を返しました: ${head === '' ? '（本文なし）' : head}`);
+  }
+}
+
 async function post(action: ClientAction): Promise<RoomSnapshot> {
   const res = await fetch('/api/game', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(action),
   });
-  const body = (await res.json()) as RoomSnapshot & { error?: string };
+  const body = await readJson(res, 'サーバ');
   if (!res.ok) throw new ApiError(body.error ?? `サーバが ${res.status} を返しました`);
   return body;
 }
@@ -116,14 +133,15 @@ export const api = {
   /** 版番号だけ。ポーリングはこれしか呼ばない */
   async version(room: string): Promise<number | null> {
     const res = await fetch(`/api/v?room=${encodeURIComponent(room)}`);
-    if (!res.ok) throw new ApiError(`サーバが ${res.status} を返しました`);
-    return ((await res.json()) as VersionResponse).version;
+    const body = await readJson(res, '版番号の経路');
+    if (!res.ok) throw new ApiError(body.error ?? `サーバが ${res.status} を返しました`);
+    return (body as unknown as VersionResponse).version;
   },
 
   async state(s: Session): Promise<RoomSnapshot> {
     const q = `room=${encodeURIComponent(s.room)}&seat=${s.seat}&token=${encodeURIComponent(s.token)}`;
     const res = await fetch(`/api/state?${q}`);
-    const body = (await res.json()) as RoomSnapshot & { error?: string };
+    const body = await readJson(res, '盤面の経路');
     if (!res.ok) throw new ApiError(body.error ?? `サーバが ${res.status} を返しました`);
     return body;
   },

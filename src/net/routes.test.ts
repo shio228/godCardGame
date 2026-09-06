@@ -11,6 +11,7 @@ import { samplePool } from '../rules/cards.sample';
 import { RoomService } from './room';
 import { MemoryStore } from './store';
 import { versionRoute } from './route.version';
+import { StoreConfigError, storeFromEnv } from './store.factory';
 import { gameRoute, stateRoute } from './routes';
 import type { RoomSnapshot, VersionResponse } from './protocol';
 
@@ -91,6 +92,50 @@ describe('経路', () => {
     const res = await gameRoute(post({ t: 'join', room: 'ZZZZZZ', name: 'だれか' }), svc);
     assert.equal(res.status, 400);
     assert.match(((await res.json()) as { error: string }).error, /部屋が見つからない/);
+  });
+});
+
+describe('保存先が設定されていないとき', () => {
+  /** Vercel 上で環境変数が入っていない状況を作る */
+  function withoutStore<T>(fn: () => T): T {
+    const saved = { ...process.env };
+    delete process.env.UPSTASH_REDIS_REST_URL;
+    delete process.env.UPSTASH_REDIS_REST_TOKEN;
+    process.env.VERCEL = '1';
+    try {
+      return fn();
+    } finally {
+      process.env = saved;
+    }
+  }
+
+  it('storeFromEnv は黙ってメモリに落ちず、直し方を言って止まる', () => {
+    withoutStore(() => {
+      assert.throws(() => storeFromEnv(), (e: Error) => {
+        assert.ok(e instanceof StoreConfigError);
+        assert.match(e.message, /UPSTASH_REDIS_REST_URL/);
+        return true;
+      });
+    });
+  });
+
+  it('操作の経路は JSON で理由を返す（素のエラーページにしない）', async () => {
+    const res = await withoutStore(() => gameRoute(post({ t: 'create', name: 'あなた', deck: { preset: 'earth' } })));
+
+    assert.equal(res.status, 500);
+    assert.match(res.headers.get('content-type') ?? '', /application\/json/);
+    const body = (await res.json()) as { error: string };
+    assert.match(body.error, /保存先が設定されていません/);
+    assert.match(body.error, /UPSTASH_REDIS_REST_URL/, '直し方がそのまま出る');
+  });
+
+  it('版番号の経路も JSON で返す', async () => {
+    const res = await withoutStore(() => versionRoute(new Request('http://x/api/v?room=ABC123')));
+
+    assert.equal(res.status, 500);
+    const body = (await res.json()) as { version: number | null; error?: string };
+    assert.equal(body.version, null);
+    assert.match(body.error ?? '', /UPSTASH_REDIS_REST_URL/);
   });
 });
 
