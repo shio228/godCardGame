@@ -122,6 +122,7 @@ section.panel h2 { margin: 0; font-size: 15px; letter-spacing: .06em; }
 .item.mine { border-left: 3px solid var(--p1); }
 .item.theirs { border-left: 3px solid var(--p2); }
 .item.immovable { opacity: .7; }
+.item[title] { cursor: help; }
 .chant { margin-left: auto; font-size: 11px; color: var(--accent); }
 
 .hand { display: flex; gap: 8px; flex-wrap: wrap; }

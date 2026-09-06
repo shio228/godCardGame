@@ -67,8 +67,25 @@ describe('ビューに入るもの', () => {
     await play(engine, 'P1', c!);
 
     const v = await playerView(engine, 'P2');
-    const names = v.stacks.flatMap((s) => s.items.map((i) => i.name));
-    assert.ok(names.includes('紅蓮着火'), '相手のスタックの項目名は見える');
+    const items = v.stacks.flatMap((s) => s.items);
+    const item = items.find((i) => i.name === '紅蓮着火');
+    assert.ok(item, '相手のスタックの項目名は見える');
+    // 手札のカードと同じように効果を出せるよう、印刷テキストも入れる
+    // （スタックのカードは両者に見えているので隠さない）
+    assert.equal(item.text, samplePool.cards.find((c) => c.id === 'earth/crimson_ignition')!.text);
+    assert.deepEqual(item.types, ['攻撃', '炎']);
+  });
+
+  it('生成された効果にはテキストが無い（カードではないので）', async () => {
+    const engine = await started();
+    engine.state.phase = 'stack';
+    const [c] = putInHand(engine, 'P1', ['earth/crimson_ignition']);
+    await play(engine, 'P1', c!);
+
+    const v = await playerView(engine, 'P1');
+    for (const it of v.stacks.flatMap((s) => s.items)) {
+      if (it.kind !== 'card') assert.equal(it.types, undefined);
+    }
   });
 
   it('勝敗が決まったら結果が入る', async () => {

@@ -221,8 +221,13 @@ function Stacks({ stacks, you }: { stacks: PlayerView['stacks']; you: string }):
 
 function Item({ item, you }: { item: StackItemView; you: string }): JSX.Element {
   const mine = item.controller === you;
+  // 手札のカードと同じで、カーソルを合わせると効果が読める
+  const tip = [item.types?.join(' / '), item.text].filter((x) => x !== undefined && x !== '').join('\n');
   return (
-    <div className={`item ${mine ? 'mine' : 'theirs'} ${item.immovable ? 'immovable' : ''}`}>
+    <div
+      className={`item ${mine ? 'mine' : 'theirs'} ${item.immovable ? 'immovable' : ''}`}
+      {...(tip === '' ? {} : { title: tip })}
+    >
       <span className="item-name">{item.name}</span>
       {item.chant !== undefined && item.chant > 0 ? <span className="chant">詠唱 {item.chant}</span> : null}
     </div>

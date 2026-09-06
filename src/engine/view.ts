@@ -52,6 +52,13 @@ export interface StackItemView {
   controller: PlayerId;
   kind: StackItemKind;
   name: string;
+  /**
+   * 印刷テキスト。スタックのカードは両者に見えているので隠さない。
+   * カードでも NamedAction でもない「生成された効果」には無い。
+   */
+  text?: string;
+  /** カードの種別（攻撃 / ドロー …）。カードのときだけ */
+  types?: string[];
   /** 詠唱カウンター（乗っているときだけ） */
   chant?: number;
   immovable?: boolean;
@@ -236,12 +243,21 @@ export async function playerView(
     stacks: s.stacks.map((st) => ({
       id: st.id,
       items: st.items.map((it) => {
+        const ctx = viewCtx(engine, it);
         const item: StackItemView = {
           uid: it.uid,
           controller: it.controller,
           kind: it.kind,
-          name: itemName(viewCtx(engine, it), it),
+          name: itemName(ctx, it),
         };
+        // 手札のカードと同じように、カーソルを合わせたら効果が読めるようにする
+        const def = it.kind === 'card' && it.card ? engine.pool.card(it.card.defId) : undefined;
+        if (def) {
+          item.text = def.text;
+          item.types = def.types;
+        } else if (it.kind === 'action' && it.actionId) {
+          item.text = engine.pool.action(it.actionId).text;
+        }
         if (it.counters.chant) item.chant = it.counters.chant;
         if (it.immovable) item.immovable = true;
         return item;
