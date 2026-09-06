@@ -324,6 +324,59 @@ describe('常在', () => {
 // 神のパッシブと誘発順
 // ============================================================
 
+describe('詠唱の育ち方', () => {
+  // 企画書「基本システム」:
+  // 「詠唱を持つカードが存在するスタックに海の神のカードが置かれるたび、
+  //   スタック上にある詠唱カウンターをそれぞれ1増やします。」
+  function chantOf(engine: Engine): number[] {
+    return engine.state.stacks.flatMap((st) => st.items.map((i) => i.counters.chant ?? 0));
+  }
+
+  async function board() {
+    const engine = setup('sea', 'sky');
+    engine.state.phase = 'stack';
+    const [dread] = putInHand(engine, 'P1', ['sea/dreadful_tidal_wave']);
+    await play(engine, 'P1', dread!);
+    return engine;
+  }
+
+  it('置いた詠唱カードは1から始まる（自分自身では増えない）', async () => {
+    const engine = await board();
+    assert.deepEqual(chantOf(engine), [1]);
+  });
+
+  it('同じスタックに自分のカードを置くたびに1増える', async () => {
+    const engine = await board();
+
+    for (const expected of [2, 3, 4]) {
+      const [c] = putInHand(engine, 'P1', ['sea/known_peril']);
+      await play(engine, 'P1', c!);
+      assert.equal(chantOf(engine)[0], expected);
+    }
+  });
+
+  it('相手のカードでは増えない', async () => {
+    const engine = await board();
+    const [foe] = putInHand(engine, 'P2', ['sky/accelerate_gale']);
+    await play(engine, 'P2', foe!);
+
+    assert.equal(chantOf(engine)[0], 1, '相手が乗せても詠唱は育たない');
+  });
+
+  it('閾値を跨いだら誘発する（ドレッドフル・タイダルウェイブ 詠唱3で2点）', async () => {
+    const engine = await board();
+    const life = engine.state.players.P2.life;
+
+    for (let i = 0; i < 2; i++) {
+      const [c] = putInHand(engine, 'P1', ['sea/known_peril']);
+      await play(engine, 'P1', c!);
+    }
+
+    assert.equal(chantOf(engine)[0], 3);
+    assert.equal(engine.state.players.P2.life, life - 2, '詠唱3の閾値で2点');
+  });
+});
+
 describe('生成のログ', () => {
   // リプレイで「大地がどの装備を作ったか」「生命がどのミニオンを何体作ったか」を追えるように
   it('トークンは名前と装備の有無が出る', async () => {

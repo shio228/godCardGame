@@ -10,6 +10,7 @@
 import type {
   ActionRef,
   CardSel,
+  CounterKind,
   DamageTag,
   Duration,
   Effect,
@@ -423,24 +424,8 @@ export async function resolve(e: Effect, ctx: Ctx): Promise<EffectResult> {
     case 'removeCounter': {
       const items = await resolveStack(e.on, ctx);
       const n = await evalValue(e.amount, ctx);
-      const delta = e.t === 'addCounter' ? n : -n;
-      for (const it of items) {
-        const before = it.counters[e.kind] ?? 0;
-        const after = before + delta;
-        it.counters[e.kind] = after;
-        await emit(ctx, {
-          kind: 'counterChanged',
-          itemUid: it.uid,
-          player: it.controller,
-          units: Math.abs(delta),
-          bindings: {
-            count: { of: 'number', value: after },
-            delta: { of: 'number', value: delta },
-            source: { of: 'stack', value: [it] },
-          },
-        });
-      }
-      return { items, amount: Math.abs(delta) };
+      await changeCounters(ctx, items, e.kind, e.t === 'addCounter' ? n : -n);
+      return { items, amount: n };
     }
 
     // ------------------------------------------------------------
@@ -1107,6 +1092,36 @@ function isPureWhileOnStackGrant(e: Effect): boolean {
  * スタック項目1つを解決する。
  * カードなら onResolve、NamedAction ならその効果、生成された効果ならその効果。
  */
+/**
+ * スタック項目のカウンタを増減する**唯一の経路**。
+ *
+ * `counterChanged` を必ず出す（詠唱の閾値誘発 `thresholds` がこれで動く）ので、
+ * `it.counters[kind] += n` を直接書かない。
+ */
+export async function changeCounters(
+  ctx: Ctx,
+  items: readonly StackItem[],
+  kind: CounterKind,
+  delta: number,
+): Promise<void> {
+  if (delta === 0) return;
+  for (const it of items) {
+    const after = (it.counters[kind] ?? 0) + delta;
+    it.counters[kind] = after;
+    await emit(ctx, {
+      kind: 'counterChanged',
+      itemUid: it.uid,
+      player: it.controller,
+      units: Math.abs(delta),
+      bindings: {
+        count: { of: 'number', value: after },
+        delta: { of: 'number', value: delta },
+        source: { of: 'stack', value: [it] },
+      },
+    });
+  }
+}
+
 export async function resolveStackItem(ctx: Ctx, it: StackItem, keepOnStack: boolean): Promise<void> {
   const s = state(ctx);
   // 解決中の項目を再び解決しない（自己再帰の防止）

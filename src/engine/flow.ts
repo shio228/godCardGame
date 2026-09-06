@@ -10,12 +10,12 @@
  */
 import type { CardDef, CardPool, ContinuousMod, Effect, God, Keyword, PlayerId, StackFilter } from '../rules/types';
 import { AutoChooser, type Chooser } from './chooser';
-import { Scope, logAction, type Ctx, type Engine, type HandlerRegistry } from './context';
+import { Scope, logAction, logLine, type Ctx, type Engine, type HandlerRegistry } from './context';
 import { coreHandlers } from './handlers';
 import { evalCondition } from './condition';
 import { evalValue } from './value';
 import { activeMods, modCtx, type ActiveMod } from './continuous';
-import { drawCards, pushPayload, resolve, resolveStackItem } from './effects';
+import { changeCounters, drawCards, pushPayload, resolve, resolveStackItem } from './effects';
 import { drainTriggers, emit, consumeLimit, limitAvailable } from './events';
 import { NotImplementedError, RuleError } from './errors';
 import { PoolIndex } from './pool';
@@ -375,6 +375,31 @@ export async function performAlternativePlay(
 }
 
 /**
+ * 詠唱の育ち方（企画書「基本システム」の詠唱の定義）。
+ *
+ * > 詠唱を持つカードが存在するスタックに海の神のカードが置かれるたび、
+ * > スタック上にある詠唱カウンターをそれぞれ1増やします。
+ *
+ * 「海の神のカード」は**その詠唱カードのコントローラーのカード**と同義に実装している
+ * （企画書「更新箇所」の書き直し: 「このカードが存在するスタックに**これのコントローラー**の
+ * カードが増えるたび、詠唱カウンターを1増やす。初期値は1」）。
+ * 詠唱を持つのは海のカードだけなので、どちらの読みでも結果は同じで、
+ * 相手が同じスタックに乗せても増えない、という当たり前の挙動になる。
+ *
+ * **増えるのはカードが置かれたときだけ。** スタックに生成された「効果」では増えない
+ * （効果で増やすと、増えた詠唱がまた効果を産んで自己加速する）。
+ */
+async function growChant(ctx: Ctx, st: StackState, placed: StackItem, player: PlayerId): Promise<void> {
+  const targets = st.items.filter(
+    (it) => it.uid !== placed.uid && it.controller === player && (it.counters.chant ?? 0) > 0,
+  );
+  if (targets.length === 0) return;
+  await changeCounters(ctx, targets, 'chant', 1);
+  logLine(ctx, `詠唱: ${targets.length}枚の詠唱カウンターが1増える`);
+  await drainTriggers(ctx.engine);
+}
+
+/**
  * 手札のカードをスタックに乗せる。
  * PlayRule（条件 / 追加コスト / 回数 / タイミング / 位置）をここで検査する。
  *
@@ -427,6 +452,12 @@ export async function play(engine: Engine, player: PlayerId, card: CardInstance)
   st.items.push(item);
 
   const itemCtx: Ctx = { engine, self: player, item, stackId: st.id, vars: new Scope() };
+
+  // 詠唱を育てる（企画書「基本システム」）:
+  // 「詠唱を持つカードが存在するスタックに海の神のカードが置かれるたび、
+  //   スタック上にある詠唱カウンターをそれぞれ1増やす」
+  // **いま置いたカード自身は増やさない**（初期値1が2になってしまうため）。
+  await growChant(itemCtx, st, item, player);
 
   // 詠唱カウンターの初期値（キーワード chant を持つカードは1つ乗った状態で始まる）
   if (def.keywords?.includes('chant')) item.counters.chant = 1;

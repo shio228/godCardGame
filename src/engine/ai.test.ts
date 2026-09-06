@@ -122,13 +122,21 @@ describe('目的志向AI', () => {
   });
 
   it('ランダムより特殊勝利で決着しやすい', async () => {
+    // 1つの組み合わせだけだとぶれるので、3組×12シードで見る
+    const pairs: [God, God][] = [
+      ['sea', 'sky'],
+      ['earth', 'life'],
+      ['sky', 'life'],
+    ];
     let greedyObjective = 0;
     let randomObjective = 0;
-    for (let i = 0; i < 12; i++) {
-      const g = await run('greedy', 'sea', 'sky', 100 + i);
-      const r = await run('random', 'sea', 'sky', 100 + i);
-      if (g.engine.state.winReason?.startsWith('勝利条件')) greedyObjective++;
-      if (r.engine.state.winReason?.startsWith('勝利条件')) randomObjective++;
+    for (const [a, b] of pairs) {
+      for (let i = 0; i < 12; i++) {
+        const g = await run('greedy', a, b, 100 + i);
+        const r = await run('random', a, b, 100 + i);
+        if (g.engine.state.winReason?.startsWith('勝利条件')) greedyObjective++;
+        if (r.engine.state.winReason?.startsWith('勝利条件')) randomObjective++;
+      }
     }
     assert.ok(
       greedyObjective >= randomObjective,
@@ -170,18 +178,20 @@ describe('目的志向AI', () => {
     revealObjectiveById(engine, 'P1', 'sea/obj_chant_thirty');
     engine.state.phase = 'stack';
 
-    // すでにスタックに詠唱29。もう1枚積めば30で勝ち
+    // すでにスタックに詠唱29。もう1枚**置けば**（詠唱が育って）30で勝ち。
+    // 種にするのはドレッドフル・タイダルウェイブ——解決しても勝たないカードなので、
+    // 「パスして解決を待つ」では勝てない盤面になる
     const { play, playChoices, putInHand } = await import('./flow');
-    const [seed1] = putInHand(engine, 'P1', ['sea/domain_expansion']);
+    const [seed1] = putInHand(engine, 'P1', ['sea/dreadful_tidal_wave']);
     const item = await play(engine, 'P1', seed1!);
     item.counters.chant = 29;
 
-    putInHand(engine, 'P1', ['sea/domain_expansion']);
+    putInHand(engine, 'P1', ['sea/known_peril']);
     const options = (await playChoices(engine, 'P1')).map((c) => ({ value: c, label: c.label }));
     const picked = await chooser.select({ kind: 'card', player: 'P1', prompt: PLAY_PROMPT, options, min: 0, max: 1 });
 
     assert.equal(picked.length, 1, '勝ちに届く手を打たずにパスした');
-    assert.equal(picked[0]!.label, 'ドメインエキスパンション');
+    assert.equal(picked[0]!.label, '既知の危機');
   });
 
   it('スタックで働くカードは、置くだけでも選ぶ（置き点）', async () => {
