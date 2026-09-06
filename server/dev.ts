@@ -4,17 +4,18 @@
  *   npm run serve            # http://localhost:5173
  *   PORT=8080 npm run serve
  *
- * 経路の中身は `api/` と同じ関数（`src/net/routes.ts`）を呼ぶだけで、
- * ここがやるのは `node:http` と Web 標準の `Request` / `Response` の橋渡しと、
- * `public/` の静的配信だけ。**本番と別のロジックを持たない**のが狙い。
+ * 経路の中身は `api/` と同じ関数（`src/net/routes.ts`）を呼ぶだけ。
+ * `node:http` との橋渡しも `api/` と同じもの（`src/net/node-bridge.ts`）を使う。
+ * ここ独自なのは `public/` の静的配信だけで、**本番と別のロジックを持たない**のが狙い。
  *
  * 保存先は既定でメモリ（プロセスを止めると部屋も消える）。
  * `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` があれば Redis を使う。
  */
-import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { extname, join, normalize, resolve } from 'node:path';
 
+import { sendResponse, toRequest } from '../src/net/node-bridge';
 import { versionRoute } from '../src/net/route.version';
 import { gameRoute, stateRoute } from '../src/net/routes';
 
@@ -63,36 +64,10 @@ async function serveStatic(path: string): Promise<Response> {
   });
 }
 
-// ============================================================
-// node:http ↔ Web 標準の橋渡し
-// ============================================================
-
-async function toRequest(req: IncomingMessage): Promise<Request> {
-  const url = `http://${req.headers.host ?? `localhost:${PORT}`}${req.url ?? '/'}`;
-  const headers = new Headers();
-  for (const [k, v] of Object.entries(req.headers)) {
-    if (typeof v === 'string') headers.set(k, v);
-    else if (Array.isArray(v)) headers.set(k, v.join(', '));
-  }
-  const method = req.method ?? 'GET';
-  if (method === 'GET' || method === 'HEAD') return new Request(url, { method, headers });
-
-  const chunks: Buffer[] = [];
-  for await (const c of req) chunks.push(c as Buffer);
-  return new Request(url, { method, headers, body: Buffer.concat(chunks) });
-}
-
-async function send(res: ServerResponse, out: Response): Promise<void> {
-  res.statusCode = out.status;
-  out.headers.forEach((v, k) => res.setHeader(k, v));
-  const body = out.body === null ? null : Buffer.from(await out.arrayBuffer());
-  res.end(body ?? undefined);
-}
-
 createServer((req, res) => {
   void (async () => {
     try {
-      await send(res, await handle(await toRequest(req)));
+      await sendResponse(res, await handle(await toRequest(req, `localhost:${PORT}`)));
     } catch (e) {
       // ここに来るのは橋渡しの不具合。経路の中の失敗は JSON で返っている
       res.statusCode = 500;
