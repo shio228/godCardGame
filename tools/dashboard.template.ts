@@ -26,8 +26,28 @@ export interface DashboardData {
     greedy: Summary;
     head: { games: number; winRate: number };
   };
+  /** どのデッキで測ったか。数字の読み方が変わるので必ず出す */
+  decks: { god: string; name: string; cards: number; source: string }[];
   replays: { id: string; label: string; record: GameRecord }[];
 }
+
+/**
+ * 行動ログの種別と表示名。**ボタンと絞り込みの両方がここだけを見る。**
+ * 以前は描画側の JS が別の配列を持っていて、種別を足したのに既定で消える不具合があった。
+ */
+const LOG_KINDS: [string, string][] = [
+  ['phase', 'フェイズ'],
+  ['play', 'プレイ'],
+  ['pass', 'パス'],
+  ['draw', 'ドロー'],
+  ['reveal', '公開'],
+  ['resolve', '解決'],
+  ['trigger', '誘発'],
+  ['create', '生成'],
+  ['damage', 'ダメージ'],
+  ['weather', '天候'],
+  ['win', '勝敗'],
+];
 
 const esc = (s: string): string =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -97,7 +117,7 @@ const SCRIPT = `
   // ---- リプレイ ----
   var games = D.replays || [];
   var cur = 0, step = 0, filters = {};
-  var KINDS = ['phase', 'play', 'pass', 'draw', 'reveal', 'resolve', 'trigger', 'weather', 'win'];
+  var KINDS = D.kinds || [];
   KINDS.forEach(function (k) { filters[k] = true; });
   var showAll = false;
 
@@ -261,6 +281,24 @@ function sweepPanel(d: DashboardData): string {
   </div>`;
 }
 
+function deckTable(d: DashboardData): string {
+  if (d.decks.length === 0) return '';
+  const rows = d.decks
+    .map(
+      (x) =>
+        `<tr><td class="mono">${esc(x.god)}</td><td>${esc(x.name)}</td>` +
+        `<td class="num mono">${x.cards}枚</td><td class="dim mono">${esc(x.source)}</td></tr>`,
+    )
+    .join('');
+  return `<div class="card">
+  <div class="rowhead"><h2>使ったデッキ</h2><span class="note">この数字はこの構成で測ったもの</span></div>
+  <div class="scroll"><table>
+    <tr><th>神</th><th>デッキ</th><th class="num">枚数</th><th>ファイル</th></tr>
+    ${rows}
+  </table></div>
+</div>`;
+}
+
 function simPanel(d: DashboardData): string {
   const { random, greedy, head } = d.sim;
   const gods = random.byGod.map((g) => g.god);
@@ -331,6 +369,7 @@ function simPanel(d: DashboardData): string {
     .join('');
 
   return `<div class="stack">
+    ${deckTable(d)}
     <div class="grid two">
       <div class="card">
         <div class="rowhead"><h2>AI比較</h2><span class="dim mono">各 ${d.sim.games} 戦 / seed ${d.sim.seed}</span></div>
@@ -368,17 +407,6 @@ function simPanel(d: DashboardData): string {
 }
 
 function replayPanel(d: DashboardData): string {
-  const kinds: [string, string][] = [
-    ['phase', 'フェイズ'],
-    ['play', 'プレイ'],
-    ['pass', 'パス'],
-    ['draw', 'ドロー'],
-    ['reveal', '公開'],
-    ['resolve', '解決'],
-    ['trigger', '誘発'],
-    ['weather', '天候'],
-    ['win', '勝敗'],
-  ];
   return `<div class="replay">
     <div class="stack">
       <h3>試合</h3>
@@ -394,7 +422,7 @@ function replayPanel(d: DashboardData): string {
           <input type="range" id="range" min="0" max="0" value="0" aria-label="再生位置">
         </div>
         <div class="controls">
-          ${kinds.map(([k, label]) => `<button class="filter" data-kind="${k}" aria-pressed="true" type="button">${label}</button>`).join('')}
+          ${LOG_KINDS.map(([k, label]) => `<button class="filter" data-kind="${k}" aria-pressed="true" type="button">${label}</button>`).join('')}
           <button class="filter" data-kind="all" aria-pressed="false" type="button">効果の内部も表示</button>
         </div>
         <div class="readout" id="readout"></div>
@@ -443,7 +471,7 @@ export function renderDashboard(d: DashboardData, opts: { standalone?: boolean }
   <section class="panel" id="p-tests">${testsPanel(d)}</section>
   <section class="panel" id="p-sweep">${sweepPanel(d)}</section>
 </div>
-<script>window.__DASH__ = ${JSON.stringify({ replays: d.replays }).replace(/</g, '\\u003c')};</script>
+<script>window.__DASH__ = ${JSON.stringify({ replays: d.replays, kinds: LOG_KINDS.map(([k]) => k) }).replace(/</g, '\\u003c')};</script>
 <script>${SCRIPT}</script>`;
 
   const head = `<meta charset="utf-8">

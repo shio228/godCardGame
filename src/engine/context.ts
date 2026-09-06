@@ -71,6 +71,8 @@ export type LogKind =
   | 'reveal'   // 勝利条件の公開
   | 'resolve'  // スタック項目の解決
   | 'trigger'  // 誘発の実行
+  | 'create'   // トークン / ミニオンの生成・生贄
+  | 'damage'   // ダメージの着弾
   | 'weather'  // 天候が起こした処理
   | 'win';     // 勝敗の確定
 

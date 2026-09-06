@@ -184,6 +184,29 @@ describe('目的志向AI', () => {
     assert.equal(picked[0]!.label, 'ドメインエキスパンション');
   });
 
+  it('スタックで働くカードは、置くだけでも選ぶ（置き点）', async () => {
+    // ドレッドフル・タイダルウェイブは詠唱1で置くだけなら0点。
+    // あとから蓄積の魔水で押し上げて初めて効くので、置き点が無いと選ばれない
+    async function pick(onStackWeight: number): Promise<number> {
+      const chooser = new GreedyChooser({ fallback: new RandomChooser(1), onStackWeight });
+      const engine = createEngine({ pool: samplePool, p1God: 'sea', p2God: 'sky', seed: 6, budget: 30000, chooser });
+      chooser.attach(engine);
+      await startGame(engine, { P1: loadDeck('sea'), P2: loadDeck('sky') });
+      engine.state.phase = 'stack';
+
+      const { playChoices, putInHand } = await import('./flow');
+      putInHand(engine, 'P1', ['sea/dreadful_tidal_wave']);
+      const options = (await playChoices(engine, 'P1'))
+        .filter((c) => c.label.includes('ドレッドフル'))
+        .map((c) => ({ value: c, label: c.label }));
+      const picked = await chooser.select({ kind: 'card', player: 'P1', prompt: PLAY_PROMPT, options, min: 0, max: 1 });
+      return picked.length;
+    }
+
+    assert.equal(await pick(0), 0, '置き点が無ければ（0点なので）パスする');
+    assert.equal(await pick(1), 1, '置き点があれば置く');
+  });
+
   it('試し打ちは本番の盤面を汚さない', async () => {
     const chooser = new GreedyChooser();
     const engine = createEngine({ pool: samplePool, p1God: 'earth', p2God: 'sky', seed: 3, budget: 20000, chooser });

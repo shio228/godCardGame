@@ -93,8 +93,46 @@ export interface GreedyOptions {
    * 試し打ちのあと、どこまで回して測るか。
    *   'item'  … 打った1枚だけを解決する（相手のスタックには触らない）
    *   'stack' … 解決フェイズをそのまま回す（相手の項目も解決される）
+   *   'phase' … スタックフェイズの続きを安い打ち手で打ち切ってから解決する
+   *
+   * 既定は **'stack'**。'phase' は「置いてから後で押し上げる」を見せるつもりで入れたが、
+   * **測ったら弱くなったので既定にしていない**（下の表）。
+   * 続きを埋める打ち手が雑（打てるなら手札の先頭）なので、
+   * candidate ごとに違う「ありもしない続き」で採点してしまうのが原因と見ている。
+   *
+   * | 設定 | 変更前との勝率 | ドレッドを置いたあと押し上げた率 | 1試合の与ダメ |
+   * |---|---|---|---|
+   * | 'stack' + 置き点（既定） | 52.8% / 49.3% | **56%** | **23** |
+   * | 'phase' 自分だけ4手 | 39.6% / 41.7% | 15% | 17 |
+   * | 'phase' 自分だけ2手 | 49.3% / 45.8% | 36% | 17 |
+   * | 'phase' 両者4手 | 45.1% / 47.2% | 33% | 24 |
+   *
+   * 直すなら続きの打ち手を賢くする（1手評価で選ばせる）ことになるが、
+   * 1判断あたりの試し打ちが桁で増えるので、やるなら明示指定のモードとして。
    */
-  rollout?: 'item' | 'stack';
+  rollout?: 'item' | 'stack' | 'phase';
+  /** 'phase' で、続きに何手打たせるか（既定4） */
+  rolloutPlays?: number;
+  /**
+   * 'phase' の続きを誰に打たせるか。
+   *   'self' … **自分の続きだけ**（相手はパスしたものとみなす。既定）
+   *   'both' … 相手にも打たせる
+   * 相手の手は読めないので、雑な打ち手で埋めると評価が濁る（実測で弱くなった）。
+   */
+  rolloutSide?: 'self' | 'both';
+  /**
+   * **スタックに置くこと自体の価値**。
+   *
+   * `active:'onStack'` の能力（詠唱の閾値・常在）を持つカードを置いたときに足す。
+   * カード個別の知識ではなく DSL の形から機械的に判定するので、
+   * AI 側に「ドレッドは置いてから押し上げろ」とは書かない。
+   *
+   * これが無いと、ドレッドフル・タイダルウェイブのように
+   * **置いた時点では0点で、あとから押し上げて初めて効く**カードが選ばれない。
+   * 実測（海の火力デッキ20試合）: 置いた回数 4→25、押し上げ成功率 50%→56%、
+   * 1試合の与ダメージ 17→23。既定1。
+   */
+  onStackWeight?: number;
 }
 
 interface Measured {
@@ -110,7 +148,10 @@ export class GreedyChooser implements Chooser {
   private readonly selfLifeWeight: number;
   private readonly hiddenWeight: number;
   private readonly opponentWeight: number;
-  private readonly rollout: 'item' | 'stack';
+  private readonly rollout: 'item' | 'stack' | 'phase';
+  private readonly rolloutPlays: number;
+  private readonly rolloutSide: 'self' | 'both';
+  private readonly onStackWeight: number;
   private readonly passThreshold: number;
   private readonly maxCandidates: number;
   private readonly budget: number;
@@ -122,6 +163,9 @@ export class GreedyChooser implements Chooser {
     this.hiddenWeight = opts.hiddenWeight ?? 0.5;
     this.opponentWeight = opts.opponentWeight ?? 15;
     this.rollout = opts.rollout ?? 'stack';
+    this.rolloutPlays = opts.rolloutPlays ?? 4;
+    this.rolloutSide = opts.rolloutSide ?? 'self';
+    this.onStackWeight = opts.onStackWeight ?? 1;
     this.passThreshold = opts.passThreshold ?? 0;
     this.maxCandidates = opts.maxCandidates ?? 12;
     this.budget = opts.budget ?? 3000;
@@ -261,7 +305,12 @@ export class GreedyChooser implements Chooser {
     // ② 解決したら。ダメージ・盤面の変化はここで出る
     try {
       if (!sb.state.winner) {
-        if (this.rollout === 'stack') {
+        if (this.rollout === 'phase') {
+          // スタックフェイズの続きを安い打ち手で打ち切ってから解決する。
+          // 「置いてから後で押し上げる」がここで初めて見える
+          await this.continuePhase(sb, player);
+          await resolvePhase(sb);
+        } else if (this.rollout === 'stack') {
           await resolvePhase(sb);
         } else if (played) {
           const still = sb.state.stacks.some((st) => st.items.some((x) => x.uid === played.uid));
@@ -275,15 +324,41 @@ export class GreedyChooser implements Chooser {
     const after = await this.measure(sb, player);
 
     const objectiveGain = Math.max(onStack.objective, after.objective) - before.objective;
+    // 案3: スタック上で働く能力を持つカードは、**置くこと自体**に価値がある
+    const placement = played !== undefined && hasOnStackAbility(sb, played) ? this.onStackWeight : 0;
     const oppGain = Math.max(onStack.oppObjective, after.oppObjective) - before.oppObjective;
     let score =
       (before.oppLife - after.oppLife) +
       (after.selfLife - before.selfLife) * this.selfLifeWeight +
       objectiveGain * this.objectiveWeight -
-      oppGain * this.opponentWeight;
+      oppGain * this.opponentWeight +
+      placement;
     if (sb.state.winner === player) score += 1000;
     else if (sb.state.winner !== undefined) score -= 1000;
     return score;
+  }
+
+  /**
+   * スタックフェイズの続きを打ち切る（試し打ちの中だけ）。
+   *
+   * 打ち手は**いちばん安いもの**——「打てるなら手札の先頭を打つ」。
+   * ここで本物の評価を再帰させると候補数ぶん指数的に膨らむので、意図的に雑にしてある。
+   * 見たいのは「置いた札が後から押し上げられるか」であって、続きの最善手ではない。
+   */
+  private async continuePhase(sb: Engine, player: PlayerId): Promise<void> {
+    const both = this.rolloutSide === 'both';
+    let seat = both ? opponentOf(player) : player; // 相手にも打たせるなら次は相手
+    for (let k = 0; k < this.rolloutPlays; k++) {
+      if (sb.state.winner) return;
+      const options = await playChoices(sb, seat);
+      const choice = options[0];
+      if (choice) {
+        if (choice.kind === 'card') await play(sb, seat, choice.card);
+        else await performAlternativePlay(sb, seat, choice.mod);
+        await drainTriggers(sb);
+      }
+      if (both) seat = opponentOf(seat);
+    }
   }
 
   private async measure(engine: Engine, player: PlayerId): Promise<Measured> {
@@ -319,6 +394,17 @@ export class GreedyChooser implements Chooser {
       targetCheckDepth: 0,
     };
   }
+}
+
+/**
+ * スタックに載っている間に働く能力を持つか（案3の判定）。
+ * カード名ではなく **DSL の形**（`active:'onStack'`）で見るので、
+ * AI 側に個別カードの知識が入らない。
+ */
+function hasOnStackAbility(engine: Engine, item: StackItem): boolean {
+  if (!item.card) return false;
+  const def = engine.pool.card(item.card.defId);
+  return (def.abilities ?? []).some((a) => 'active' in a && a.active === 'onStack');
 }
 
 /** 「いま公開している条件・伏せている条件」を表示用にまとめる（ダッシュボード用） */

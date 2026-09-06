@@ -12,7 +12,7 @@ import { Scope, type Ctx } from './context';
 import { dealDamage } from './damage';
 import { drainTriggers } from './events';
 import { evalValue } from './value';
-import { resolve, resolveTop } from './effects';
+import { resolve, resolveStackItem, resolveTop } from './effects';
 import { createEngine, endTurn, play, putInHand, putOnDeck, resolvePhase, startCycle, topCtx } from './flow';
 import type { Engine } from './context';
 import type { God } from '../rules/types';
@@ -323,6 +323,119 @@ describe('常在', () => {
 // ============================================================
 // 神のパッシブと誘発順
 // ============================================================
+
+describe('生成のログ', () => {
+  // リプレイで「大地がどの装備を作ったか」「生命がどのミニオンを何体作ったか」を追えるように
+  it('トークンは名前と装備の有無が出る', async () => {
+    const engine = setup('earth', 'life');
+    await resolveTop({ t: 'createToken', equip: true, token: 'earth/sword' }, topCtx(engine, 'P1'));
+
+    const line = engine.log.map((l) => l.text).find((t) => t.includes('生成'));
+    assert.equal(line, 'P1 が生成: インフェルノフューリー（剣）（装備）');
+  });
+
+  it('ミニオンは種族・体数・生成後の合計が出る', async () => {
+    const engine = setup('life', 'earth');
+    engine.state.players.P1.minions.wraith = 1;
+    await resolveTop({ t: 'createMinion', species: 'wraith', count: 2 }, topCtx(engine, 'P1'));
+
+    const line = engine.log.map((l) => l.text).find((t) => t.includes('生成'));
+    assert.equal(line, 'P1 が生成: 死霊 2体（計 3体）');
+  });
+
+  it('生贄は残りの体数が出る', async () => {
+    const engine = setup('life', 'earth');
+    engine.state.players.P1.minions.human = 4;
+    await resolveTop({ t: 'sacrificeMinion', species: 'human', count: 3 }, topCtx(engine, 'P1'));
+
+    const line = engine.log.map((l) => l.text).find((t) => t.includes('生贄'));
+    assert.equal(line, 'P1 が生贄: 人間 3体（残り 1体）');
+  });
+});
+
+describe('死霊（ミニオンの種族特徴）', () => {
+  /** P1 に死霊と人を並べてから、指定の種族を n 体殺す */
+  async function kill(species: 'wraith' | 'human', n: number) {
+    const engine = setup('life', 'sky');
+    const p = engine.state.players.P1;
+    p.minions.wraith = 3;
+    p.minions.human = 3;
+    const before = engine.state.players.P2.life;
+
+    await resolveTop(
+      { t: 'damage', to: { t: 'minion', species, owner: { t: 'self' } }, amount: n, flags: { ignoreCycleBonus: true } },
+      topCtx(engine, 'P1'),
+    );
+    await drainTriggers(engine);
+    return before - engine.state.players.P2.life;
+  }
+
+  it('死霊が死んだときだけ、死んだ死霊の数だけ飛ぶ', async () => {
+    assert.equal(await kill('wraith', 2), 2, '死霊2体 → 2点');
+  });
+
+  it('他の種族が死んでも飛ばない', async () => {
+    assert.equal(await kill('human', 3), 0, '人が死んでも死霊のダメージは出ない');
+  });
+});
+
+describe('自傷ダメージ', () => {
+  // 企画書「テストプレイ」の調整案①:
+  // 「自傷は黒曜では軽減できないってやってみている。不壊くんあるしな。
+  //   黒曜で防げると同じターンにブレイジング2枚以上がよりやりやすくなりすぎる。」
+  it('ブレイジングラッシュの自傷は軽減されない', async () => {
+    const engine = setup('earth', 'sky');
+    engine.state.phase = 'stack';
+    // 黒曜備え（装備数ぶん軽減）と、鎧袖一触が残す軽減の両方を積んでおく
+    engine.state.players.P1.tokens.push({ uid: 'TK-a', defId: 'earth/armor_obsidian', owner: 'P1', equipped: true });
+    engine.state.players.P1.status.reduction = 5;
+
+    const [rush] = putInHand(engine, 'P1', ['earth/blazing_rush']);
+    await play(engine, 'P1', rush!);
+    const life = engine.state.players.P1.life;
+
+    // 1枚プレイすると自傷が誘発する
+    const [next] = putInHand(engine, 'P1', ['earth/crimson_ignition']);
+    await play(engine, 'P1', next!);
+
+    assert.equal(engine.state.players.P1.life, life - 2, '軽減6あっても2点そのまま通る');
+  });
+
+  it('不壊剛壁があれば無効化される（軽減不可でも無効化は効く）', async () => {
+    const engine = setup('earth', 'sky');
+    engine.state.phase = 'stack';
+
+    const [wall] = putInHand(engine, 'P1', ['earth/indestructible_wall']);
+    await play(engine, 'P1', wall!); // 常在なのでスタックに残って働く
+    const [rush] = putInHand(engine, 'P1', ['earth/blazing_rush']);
+    await play(engine, 'P1', rush!);
+    const life = engine.state.players.P1.life;
+
+    const [next] = putInHand(engine, 'P1', ['earth/crimson_ignition']);
+    await play(engine, 'P1', next!);
+
+    assert.equal(engine.state.players.P1.life, life, '不壊剛壁が自傷を無効化する');
+  });
+
+  it('燃え盛る大地の自傷も不壊剛壁で無効化される', async () => {
+    const engine = setup('earth', 'sky');
+    engine.state.phase = 'stack';
+
+    const [wall] = putInHand(engine, 'P1', ['earth/indestructible_wall']);
+    await play(engine, 'P1', wall!);
+    const [burn] = putInHand(engine, 'P1', ['earth/burning_earth']);
+    await play(engine, 'P1', burn!);
+    const life = engine.state.players.P1.life;
+
+    // 自分のカードを解決させると「解決しようとするたび1点」が誘発する
+    const [card] = putInHand(engine, 'P1', ['earth/crimson_ignition']);
+    const item = await play(engine, 'P1', card!);
+    await resolveStackItem(topCtx(engine, 'P1'), item, false);
+    await drainTriggers(engine);
+
+    assert.equal(engine.state.players.P1.life, life, '不壊剛壁は燃え盛る大地も止める');
+  });
+});
 
 describe('解決中の項目はスタックから出せない', () => {
   // 企画側判断（2026-09-06）。これが無いと「自分自身を手札に戻す → 手札が減らないまま

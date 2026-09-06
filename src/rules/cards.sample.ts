@@ -301,8 +301,10 @@ export const minions: MinionDef[] = [
       {
         kind: 'triggered',
         active: 'inField',
-        // 暗黙束縛 count = 死亡した体数（granularity 既定 perEvent なので1回だけ発火する）
-        when: { on: 'minionDied' },
+        // **死霊が死んだときだけ**（種族一覧の他の行と同じで、その種族自身の特徴）。
+        // species を書かないと、人や天使が死んでも死霊がダメージを飛ばしてしまう。
+        // minionDied は種族ごとに出るので、暗黙束縛 count = 死んだ死霊の体数になる
+        when: { on: 'minionDied', species: { is: 'wraith' } },
         effect: {
           t: 'damage',
           to: { t: 'player', who: { t: 'opponent' } },
@@ -1375,6 +1377,7 @@ export const blazingRush: CardDef = {
     '瞬発\n' +
     'カードを2枚引き、公開する。\n' +
     'このサイクルが終わるまで、あなたはカードをプレイするたび、2点のダメージを受ける。\n' +
+    'このダメージは軽減できない。\n' +
     'このサイクル終了時にカードがプレイされなかったなら、それらのカードを墓地に置く。',
   keywords: ['instant'],
   abilities: [
@@ -1400,6 +1403,12 @@ export const blazingRush: CardDef = {
                   to: { t: 'player', who: { t: 'self' } },
                   amount: 2,
                   tags: ['self'],
+                  // 企画書「テストプレイ」の調整案①:
+                  // 「自傷は黒曜では軽減できないってやってみている。不壊くんあるしな。
+                  //   黒曜で防げると同じターンにブレイジング2枚以上がよりやりやすくなりすぎる。」
+                  // 印刷テキストにも「このダメージは軽減できない。」を足してある（企画側判断・2026-09-06）。
+                  // 無効化（不壊剛壁の damagePrevention）はパイプラインの別の段なので、そちらは効く
+                  flags: { unreducible: true },
                 },
               },
             },
@@ -1579,7 +1588,10 @@ export const burningEarth: CardDef = {
         // 暗黙束縛 source = 解決しようとしているスタック項目
         to: { t: 'player', who: { t: 'controllerOf', of: { t: 'var', name: 'source' } } },
         amount: 1,
-        tags: ['fire'],
+        // 'self' が要る。不壊剛壁は「自傷ダメージを受けない」（企画書 大地の神設定 E54:
+        // 「あなたは『ブレイジングラッシュ』と『燃え盛る大地』の効果によってダメージを受けない」）ので、
+        // この印が無いと不壊剛壁が燃え盛る大地を止められない
+        tags: ['fire', 'self'],
         flags: { unreducible: true, ignoreCycleBonus: true },
       },
     },

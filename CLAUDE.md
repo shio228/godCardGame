@@ -10,6 +10,7 @@ npm run typecheck   # tsc --noEmit（strict + exactOptionalPropertyTypes + noUnc
 npm test            # node --test。ゴールデンテスト
 npm run sweep       # 全カードを空盤面で走らせ、落ちるカードを一覧にする煙テスト
 npm run simulate    # 自動対戦。神別勝率・決着サイクル・勝因・先攻後攻差を出す
+                    # 既定以外のデッキで測るなら --deck decks/<ファイル>.txt を神のぶんだけ並べる
 npm run replay      # 1試合を記録して再生する（落ちた試合を1手ずつ追う）
 npm run dashboard   # テスト・煙テスト・自動対戦・リプレイを1枚のHTMLにする
 npm run deck        # 手組みデッキ（decks/*.txt）の検証と要約

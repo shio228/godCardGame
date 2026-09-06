@@ -14,10 +14,10 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
-import { DECKS_DIR, PLAYABLE_GODS } from '../src/rules/decks.load';
+import { DECKS_DIR, PLAYABLE_GODS, loadDeckFile } from '../src/rules/decks.load';
 import type { GameRecord } from '../src/engine/replay';
 import { renderDashboard, type DashboardData, type TestSuite } from './dashboard.template';
-import { runMatches, summarize, type Outcome } from './stats';
+import { deckFor, runMatches, summarize, type Outcome } from './stats';
 import type { God } from '../src/rules/types';
 
 function arg(name: string, fallback: string): string {
@@ -111,7 +111,13 @@ function collectSweep(): DashboardData['sweep'] {
 // 自動対戦
 // ============================================================
 
-async function collectSim(games: number, seed: number, gods: God[], decksDir: string): Promise<{
+async function collectSim(
+  games: number,
+  seed: number,
+  gods: God[],
+  decksDir: string,
+  deckFiles: Partial<Record<God, string>>,
+): Promise<{
   sim: DashboardData['sim'];
   replays: DashboardData['replays'];
 }> {
@@ -129,17 +135,18 @@ async function collectSim(games: number, seed: number, gods: God[], decksDir: st
     }
   };
 
-  const randomOut = await runMatches({ games, seed, gods, decksDir, ai: { P1: 'random', P2: 'random' } });
+  const randomOut = await runMatches({ games, seed, gods, decksDir, deckFiles, ai: { P1: 'random', P2: 'random' } });
   const greedyOut = await runMatches({
     games,
     seed,
     gods,
     decksDir,
+    deckFiles,
     ai: { P1: 'greedy', P2: 'greedy' },
     onRecord: remember('目的志向'),
   });
-  const headA = await runMatches({ games: Math.round(games / 2), seed, gods, decksDir, ai: { P1: 'greedy', P2: 'random' } });
-  const headB = await runMatches({ games: Math.round(games / 2), seed, gods, decksDir, ai: { P1: 'random', P2: 'greedy' } });
+  const headA = await runMatches({ games: Math.round(games / 2), seed, gods, decksDir, deckFiles, ai: { P1: 'greedy', P2: 'random' } });
+  const headB = await runMatches({ games: Math.round(games / 2), seed, gods, decksDir, deckFiles, ai: { P1: 'random', P2: 'greedy' } });
   const head = [...headA, ...headB];
   const decided = head.filter((o) => o.winner === 'P1' || o.winner === 'P2');
   const greedyWins = decided.filter((o) => (o.ai.P1 === 'greedy' ? o.winner === 'P1' : o.winner === 'P2')).length;
@@ -160,12 +167,33 @@ async function collectSim(games: number, seed: number, gods: God[], decksDir: st
 
 // ============================================================
 
+/**
+ * `--deck <path>` を繰り返して、神ごとにデッキファイルを名指しする。
+ * どの神のデッキかは**ファイルの `god:` 行から判る**ので、順番も名前も自由。
+ * 同じ神を2つ渡したら黙って片方を捨てずにエラーにする。
+ */
+export function deckFilesFromArgs(argv: string[] = process.argv): Partial<Record<God, string>> {
+  const out: Partial<Record<God, string>> = {};
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] !== '--deck') continue;
+    const path = argv[i + 1];
+    if (path === undefined) throw new Error('--deck のあとにデッキファイルのパスが要る');
+    const deck = loadDeckFile(path);
+    if (out[deck.god] !== undefined) {
+      throw new Error(`${deck.god} のデッキが2つ指定されている: ${out[deck.god]} と ${path}`);
+    }
+    out[deck.god] = path;
+  }
+  return out;
+}
+
 async function main(): Promise<void> {
   const quick = process.argv.includes('--quick');
   const games = Number(arg('games', quick ? '48' : '240'));
   const seed = Number(arg('seed', '1'));
   const gods = arg('gods', PLAYABLE_GODS.join(',')).split(',') as God[];
   const decksDir = arg('decks', DECKS_DIR);
+  const deckFiles = deckFilesFromArgs();
   const out = arg('out', 'tmp/dashboard.html');
   const fragment = process.argv.includes('--fragment');
 
@@ -182,7 +210,14 @@ async function main(): Promise<void> {
   console.log(`${sweep.ok}/${sweep.total}`);
 
   process.stdout.write(`自動対戦（各 ${games} 戦）… `);
-  const { sim, replays } = await collectSim(games, seed, gods, decksDir);
+  const { sim, replays } = await collectSim(games, seed, gods, decksDir, deckFiles);
+
+  // どのデッキで測ったかを残す（構成が変われば数字の意味も変わるので）
+  const decks = gods.map((god) => {
+    const source = deckFiles[god] ?? `${decksDir}/${god}.txt`;
+    const deck = deckFor(god, { decksDir, deckFiles });
+    return { god, name: deck.name, cards: deck.cards.length, source };
+  });
   console.log(`エラー ${sim.random.errors.length + sim.greedy.errors.length}`);
 
   const data: DashboardData = {
@@ -191,6 +226,7 @@ async function main(): Promise<void> {
     tests,
     sweep,
     sim,
+    decks,
     replays,
   };
 

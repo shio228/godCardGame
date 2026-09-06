@@ -29,19 +29,20 @@ function atLeast(a: Value, b: Value): Condition {
 // 大地の神 — アグロ / 強化オーラ　先行度配分：高（1 / 3 / 6）
 // ============================================================
 
-/** 先行度高「10回目のダメージを与えたなら勝利する。」 */
+/** 先行度高「1サイクル中に10回目のダメージを与えたなら勝利する。」 */
 export const earthTenStrikes: ObjectiveDef = {
   id: 'earth/obj_ten_strikes',
   name: '十連撃の誓約',
   god: 'earth',
   initiative: 1,
-  text: 'あなたが10回目のダメージを与えたなら、勝利する。',
+  text: 'あなたが1サイクル中に10回目のダメージを与えたなら、勝利する。',
   when: { on: 'damageDealt' },
   cond: atLeast(
     {
       t: 'countEvent',
       event: 'damageDealt',
-      scope: 'game',
+      // **サイクルを跨いで数えない**（企画側の調整・2026-09-06。通算だと強すぎたため）
+      scope: 'cycle',
       measure: 'events',
       by: { t: 'self' },
       to: { t: 'opponent' },
@@ -49,7 +50,8 @@ export const earthTenStrikes: ObjectiveDef = {
     10,
   ),
   note:
-    '企画書の改訂案①は「この勝利条件を公開したターンに15回」（scope を turn に、10 を 15 に）。\n' +
+    '**1サイクル中**で数える（企画側の調整・2026-09-06。通算だと強すぎた）。\n' +
+    '企画書の改訂案①は「この勝利条件を公開したターンに15回」（回数を 15 にする案）。\n' +
     'measure:"events" は回数なので、軽減しきられて0点だったダメージも1回と数える。' +
     '企画書には「0ダメでも数えるから納得いかないかも」というコメントがあるが、' +
     '**0点でも1回と数える**で確定（企画側の判断・2026-08-31）。\n' +

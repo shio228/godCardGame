@@ -46,8 +46,11 @@ describe('埋め込む索引', () => {
     );
   });
 
-  it('decks/ の4デッキを同梱する', () => {
-    assert.deepEqual(Object.keys(data.decks).sort(), ['earth', 'life', 'sea', 'sky']);
+  it('decks/ のデッキを全部同梱し、どの神にも1本以上ある', () => {
+    const names = Object.keys(data.decks);
+    assert.ok(names.length >= 4, `同梱デッキが少なすぎる: ${names.join(', ')}`);
+    const gods = new Set(Object.entries(data.decks).map(([name, text]) => load(text, pool).god));
+    for (const g of ['earth', 'life', 'sea', 'sky']) assert.ok(gods.has(g as never), `${g} のデッキが無い`);
   });
 });
 

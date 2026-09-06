@@ -210,6 +210,32 @@ describe('大地', () => {
     assert.equal(engine.state.winner, 'P1');
   });
 
+  it('十連撃の誓約 — サイクルを跨いだら数え直す', async () => {
+    // 企画側の調整（2026-09-06）: 1サイクル中に10回。通算だと強すぎた
+    const engine = setup('earth', 'sea', pick(earthTen, seaChant));
+    setupBoth(engine, 'earth', 'sea');
+    await startCycle(engine);
+
+    const hit = async (n: number): Promise<void> => {
+      for (let i = 0; i < n; i++) {
+        await resolveTop(
+          { t: 'damage', to: { t: 'player', who: { t: 'opponent' } }, amount: 1, flags: { ignoreCycleBonus: true } },
+          topCtx(engine, 'P1'),
+        );
+      }
+    };
+
+    await hit(9);
+    assert.equal(engine.state.winner, undefined, '9回ではまだ');
+
+    await startCycle(engine); // サイクルが進むとカウントは持ち越さない
+    await hit(9);
+    assert.equal(engine.state.winner, undefined, '前のサイクルの9回とは合算しない');
+
+    await hit(1);
+    assert.equal(engine.state.winner, 'P1', '同じサイクルで10回目に達したら勝ち');
+  });
+
   it('十連撃の誓約 — 自傷は数えない（攻撃回数の条件なので）', async () => {
     // ブレイジングラッシュの「カードをプレイするたび2点受ける」は自分が自分に与えるダメージ。
     // これを数えると、スタックフェイズにカードを並べるだけで達成してしまう
@@ -287,6 +313,32 @@ describe('海', () => {
     );
     assert.equal(item.counters.chant, 30);
     assert.equal(engine.state.winner, 'P1');
+  });
+
+  it('十連撃の誓約 — サイクルを跨いだら数え直す', async () => {
+    // 企画側の調整（2026-09-06）: 1サイクル中に10回。通算だと強すぎた
+    const engine = setup('earth', 'sea', pick(earthTen, seaChant));
+    setupBoth(engine, 'earth', 'sea');
+    await startCycle(engine);
+
+    const hit = async (n: number): Promise<void> => {
+      for (let i = 0; i < n; i++) {
+        await resolveTop(
+          { t: 'damage', to: { t: 'player', who: { t: 'opponent' } }, amount: 1, flags: { ignoreCycleBonus: true } },
+          topCtx(engine, 'P1'),
+        );
+      }
+    };
+
+    await hit(9);
+    assert.equal(engine.state.winner, undefined, '9回ではまだ');
+
+    await startCycle(engine); // サイクルが進むとカウントは持ち越さない
+    await hit(9);
+    assert.equal(engine.state.winner, undefined, '前のサイクルの9回とは合算しない');
+
+    await hit(1);
+    assert.equal(engine.state.winner, 'P1', '同じサイクルで10回目に達したら勝ち');
   });
 
   it('十連撃の誓約 — 自傷は数えない（攻撃回数の条件なので）', async () => {

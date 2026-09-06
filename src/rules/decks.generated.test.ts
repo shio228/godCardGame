@@ -23,10 +23,14 @@ describe('埋め込みデッキ', () => {
     assert.equal(actual, expected, `${OUT} が decks/*.txt と食い違っている。npm run gen:decks を実行する`);
   });
 
-  it('4本ぜんぶ揃っていて、それぞれ違う神', () => {
-    assert.deepEqual([...PRESET_NAMES].sort(), ['earth', 'life', 'sea', 'sky']);
+  it('どの神にも1本以上ある（同神対決を避けられる）', () => {
     const index = new PoolIndex(samplePool);
     const gods = PRESET_NAMES.map((n) => parseDeckList(DECK_TEXTS[n]!, index, { name: n }).god);
-    assert.equal(new Set(gods).size, gods.length, '同神対決を避けられるよう、神は重ならない');
+
+    for (const g of ['earth', 'life', 'sea', 'sky']) {
+      assert.ok(gods.includes(g as never), `${g} のデッキが1本も無い`);
+    }
+    // AI の席は「相手と違う神」を選ぶので、2種類以上あれば必ず組める
+    assert.ok(new Set(gods).size >= 2, '神が1種類しかないと対戦を組めない');
   });
 });

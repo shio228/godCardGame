@@ -117,7 +117,8 @@ export async function resolve(e: Effect, ctx: Ctx): Promise<EffectResult> {
             ...(ctx.item ? { source: ctx.item } : {}),
           };
           const r = await dealDamage(ctx, spec);
-          logLine(ctx, `ダメージ ${r.dealt} → ${entityLabel(ctx, r.target)}（通った ${r.applied}）`);
+          // ダメージは行動として残す（リプレイで既定表示にするため）
+          logAction(ctx.engine, 'damage', `ダメージ ${r.dealt} → ${entityLabel(ctx, r.target)}（通った ${r.applied}）`, ctx.self);
           total += r.dealt;
         }
       }
@@ -483,6 +484,14 @@ export async function resolve(e: Effect, ctx: Ctx): Promise<EffectResult> {
         };
         s.players[owner].tokens.push(tk);
         made.push(tk);
+        // 何を作ったかはリプレイで追えないと困る（大地は装備で打点が変わる）。
+        // 誘発（槍の刺突など）より先に出す
+        logAction(
+          ctx.engine,
+          'create',
+          `${owner} が生成: ${pool(ctx).token(defId).name}${tk.equipped ? '（装備）' : ''}`,
+          owner,
+        );
         await emit(ctx, {
           kind: 'tokenCreated',
           player: owner,
@@ -508,7 +517,9 @@ export async function resolve(e: Effect, ctx: Ctx): Promise<EffectResult> {
       const sp = await resolveSpecies(e.species, ctx);
       const n = await evalValue(e.count, ctx);
       if (n <= 0) return { amount: 0 };
-      s.players[owner].minions[sp] = (s.players[owner].minions[sp] ?? 0) + n;
+      const totalAfter = (s.players[owner].minions[sp] ?? 0) + n;
+      s.players[owner].minions[sp] = totalAfter;
+      logAction(ctx.engine, 'create', `${owner} が生成: ${pool(ctx).minion(sp)?.name ?? sp} ${n}体（計 ${totalAfter}体）`, owner);
       await emit(ctx, {
         kind: 'minionCreated',
         player: owner,
@@ -527,6 +538,7 @@ export async function resolve(e: Effect, ctx: Ctx): Promise<EffectResult> {
       const n = Math.min(want, have);
       if (n <= 0) return { amount: 0 };
       s.players[owner].minions[sp] = have - n;
+      logAction(ctx.engine, 'create', `${owner} が生贄: ${pool(ctx).minion(sp)?.name ?? sp} ${n}体（残り ${have - n}体）`, owner);
       const bindings = { species: { of: 'species' as const, value: sp }, count: { of: 'number' as const, value: n } };
       await emit(ctx, { kind: 'minionSacrificed', player: owner, species: sp, units: n, bindings });
       await emit(ctx, { kind: 'minionDied', player: owner, species: sp, units: n, bindings });

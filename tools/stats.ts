@@ -9,7 +9,7 @@
  * 達成率0%が「達成不能」なのか「AIが踏めていないだけ」なのかを切り分けるため。
  */
 import { samplePool } from '../src/rules/cards.sample';
-import { DECKS_DIR, loadDeck } from '../src/rules/decks.load';
+import { DECKS_DIR, loadDeck, loadDeckFile } from '../src/rules/decks.load';
 import { GreedyChooser } from '../src/engine/ai';
 import { PerPlayerChooser, RandomChooser, type Chooser } from '../src/engine/chooser';
 import type { Engine } from '../src/engine/context';
@@ -59,6 +59,14 @@ export interface PlayOptions {
   ai: { P1: AiKind; P2: AiKind };
   /** デッキファイルの置き場（既定 decks/） */
   decksDir?: string;
+  /** 神ごとにデッキファイルを名指しする（`--deck` で渡す。置き場より優先） */
+  deckFiles?: Partial<Record<God, string>>;
+}
+
+/** その神のデッキ。名指しがあればそれを、無ければ置き場の `<god>.txt` を読む */
+export function deckFor(god: God, o: { decksDir?: string | undefined; deckFiles?: Partial<Record<God, string>> | undefined }) {
+  const named = o.deckFiles?.[god];
+  return named !== undefined ? loadDeckFile(named) : loadDeck(god, o.decksDir ?? DECKS_DIR);
 }
 
 export async function playOne(o: PlayOptions): Promise<{ outcome: Outcome; record: GameRecord }> {
@@ -68,7 +76,7 @@ export async function playOne(o: PlayOptions): Promise<{ outcome: Outcome; recor
     pool: samplePool,
     p1God: o.p1God,
     p2God: o.p2God,
-    decks: { P1: loadDeck(o.p1God, o.decksDir ?? DECKS_DIR), P2: loadDeck(o.p2God, o.decksDir ?? DECKS_DIR) },
+    decks: { P1: deckFor(o.p1God, o), P2: deckFor(o.p2God, o) },
     seed: o.seed,
     chooser: new PerPlayerChooser({ P1: a.chooser, P2: b.chooser }),
     onEngine: (e) => {
@@ -113,6 +121,7 @@ export interface RunOptions {
   gods: God[];
   ai: { P1: AiKind; P2: AiKind };
   decksDir?: string;
+  deckFiles?: Partial<Record<God, string>>;
   /** 記録を受け取るコールバック（保存したいときだけ） */
   onRecord?: (outcome: Outcome, record: GameRecord) => void;
 }
@@ -140,6 +149,7 @@ export async function runMatches(opts: RunOptions): Promise<Outcome[]> {
         seed,
         ai: opts.ai,
         ...(opts.decksDir !== undefined ? { decksDir: opts.decksDir } : {}),
+        ...(opts.deckFiles !== undefined ? { deckFiles: opts.deckFiles } : {}),
       });
       out.push(outcome);
       opts.onRecord?.(outcome, record);

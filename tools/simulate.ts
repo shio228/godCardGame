@@ -22,7 +22,7 @@
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 
-import { DECKS_DIR, PLAYABLE_GODS } from '../src/rules/decks.load';
+import { DECKS_DIR, PLAYABLE_GODS, loadDeckFile } from '../src/rules/decks.load';
 import { runMatches, summarize, type AiKind, type Outcome, type Summary } from './stats';
 import type { God } from '../src/rules/types';
 
@@ -139,6 +139,26 @@ function printComparison(random: Summary, greedy: Summary, head: Outcome[], gods
   console.log(`   ※ 50%を明確に超えていれば「AIとして機能している」ことの確認になる`);
 }
 
+/**
+ * `--deck <path>` を繰り返して、神ごとにデッキファイルを名指しする。
+ * どの神のデッキかは**ファイルの `god:` 行から判る**ので、順番も名前も自由。
+ * 同じ神を2つ渡したら黙って片方を捨てずにエラーにする。
+ */
+export function deckFilesFromArgs(argv: string[] = process.argv): Partial<Record<God, string>> {
+  const out: Partial<Record<God, string>> = {};
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] !== '--deck') continue;
+    const path = argv[i + 1];
+    if (path === undefined) throw new Error('--deck のあとにデッキファイルのパスが要る');
+    const deck = loadDeckFile(path);
+    if (out[deck.god] !== undefined) {
+      throw new Error(`${deck.god} のデッキが2つ指定されている: ${out[deck.god]} と ${path}`);
+    }
+    out[deck.god] = path;
+  }
+  return out;
+}
+
 async function main(): Promise<void> {
   const games = Number(arg('games', '200'));
   const seed = Number(arg('seed', '1'));
@@ -148,6 +168,7 @@ async function main(): Promise<void> {
   const compare = process.argv.includes('--compare');
   const ai = arg('ai', 'random') as AiKind;
   const decksDir = arg('decks', DECKS_DIR);
+  const deckFiles = deckFilesFromArgs();
 
   if (saveDir) mkdirSync(saveDir, { recursive: true });
   const onRecord = saveDir
@@ -163,6 +184,7 @@ async function main(): Promise<void> {
       seed,
       gods,
       decksDir,
+      deckFiles,
       ai: { P1: ai, P2: ai },
       ...(onRecord ? { onRecord } : {}),
     });
@@ -172,11 +194,11 @@ async function main(): Promise<void> {
   }
 
   // 比較モード: 同じシードで3通り回す
-  const randomOut = await runMatches({ games, seed, gods, decksDir, ai: { P1: 'random', P2: 'random' } });
-  const greedyOut = await runMatches({ games, seed, gods, decksDir, ai: { P1: 'greedy', P2: 'greedy' } });
+  const randomOut = await runMatches({ games, seed, gods, decksDir, deckFiles, ai: { P1: 'random', P2: 'random' } });
+  const greedyOut = await runMatches({ games, seed, gods, decksDir, deckFiles, ai: { P1: 'greedy', P2: 'greedy' } });
   // 直接対決は先後を入れ替えた2本立て（先攻の有利不利を打ち消す）
-  const headA = await runMatches({ games: Math.round(games / 2), seed, gods, decksDir, ai: { P1: 'greedy', P2: 'random' } });
-  const headB = await runMatches({ games: Math.round(games / 2), seed, gods, decksDir, ai: { P1: 'random', P2: 'greedy' } });
+  const headA = await runMatches({ games: Math.round(games / 2), seed, gods, decksDir, deckFiles, ai: { P1: 'greedy', P2: 'random' } });
+  const headB = await runMatches({ games: Math.round(games / 2), seed, gods, decksDir, deckFiles, ai: { P1: 'random', P2: 'greedy' } });
 
   const r = summarize('ランダムAI', randomOut, gods);
   const g = summarize('目的志向AI', greedyOut, gods);

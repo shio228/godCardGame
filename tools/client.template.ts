@@ -143,6 +143,7 @@ section.panel h2 { margin: 0; font-size: 15px; letter-spacing: .06em; }
 .log .depth-0 { color: var(--ink); }
 .log .kind-phase { color: var(--accent); letter-spacing: .06em; }
 .log .kind-damage { color: var(--crit); }
+.log .kind-create { color: var(--ok); }
 .log .depth-1 { padding-left: 10px; }
 .log .depth-2 { padding-left: 20px; }
 .log .depth-3 { padding-left: 30px; }
