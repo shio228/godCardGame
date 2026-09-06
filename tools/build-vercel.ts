@@ -5,14 +5,16 @@
  *
  * ## なぜ自分で束ねるのか
  *
- * `api/*.ts` をそのまま置くと、Vercel は**その1ファイルだけを JS に変換して**置く。
+ * リポジトリの根に `api/*.ts` を置くと、Vercel は**それを自分で1ファイルだけ JS に変換して**置く。
  * このリポジトリは ESM（`package.json` の `"type": "module"`）なので、
  * Node は**拡張子を補完しない**——`../src/net/routes` は実行時に解決できず、
- * 関数が起動前に落ちる（`ERR_MODULE_NOT_FOUND`）。
+ * 関数が起動前に落ちる（`ERR_MODULE_NOT_FOUND` → ブラウザには `FUNCTION_INVOCATION_FAILED`）。
  *
  * そこで**こちらで esbuild で1ファイルに束ねてから渡す**。
- * 束ねた後の関数には相対 import が1つも残らないので、
- * 向こう側の解決の仕方に依存しなくなる（`tools/build-vercel.test.ts` が見張る）。
+ * 束ねた後の関数には相対 import が1つも残らないので、向こう側の解決の仕方に依存しない。
+ *
+ * **入口は `server/functions/` に置く。** 根に `api/` があると Vercel の自動検出が
+ * それを拾って自前でビルドしてしまい、こちらの成果物が使われない（実際に踏んだ）。
  *
  * ## 出来上がり
  *
@@ -30,7 +32,7 @@ import { cpSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const OUT = '.vercel/output';
-const API_DIR = 'api';
+const API_DIR = 'server/functions';
 /** Vercel 側の Node。ここで指定しておくと、プロジェクト設定に左右されない */
 const RUNTIME = 'nodejs22.x';
 

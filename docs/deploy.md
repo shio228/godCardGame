@@ -74,13 +74,20 @@ room:<合言葉>:v    版番号だけ    ← ポーリングはこれしか読�
     index.mjs                      esbuild で1ファイルに束ねた関数
 ```
 
-**`api/*.ts` をそのまま置くとVercelはその1ファイルだけをJSに変換する。**
-このリポジトリは ESM なので Node は拡張子を補完せず、`../src/net/routes` が
+関数の入口は **`server/functions/*.ts`** に置いてある。ここが要点で、
+**リポジトリの根に `api/` があると Vercel が自動検出して自前でビルドしてしまい、
+上の成果物が使われない**。
+
+Vercel が自前でビルドすると、`api/game.ts` は**その1ファイルだけ**が JS に変換される。
+このリポジトリは ESM なので Node は拡張子を補完せず、`../src/net/routes` を
 実行時に解決できずに関数が起動前に落ちる（`ERR_MODULE_NOT_FOUND` →
-ブラウザには `FUNCTION_INVOCATION_FAILED`）。実際に一度踏んだので、
-**束ねてから渡す**形にした。`tools/build-vercel.test.ts` が
-「束ねた結果に相対 import が残っていないこと」と
+ブラウザには `FUNCTION_INVOCATION_FAILED`）。実際に2度踏んだ。
+
+`tools/build-vercel.test.ts` が「束ねた結果に相対 import が残っていないこと」と
 「束ねたものを読み込んで実際に応答が返ること」を毎回確かめている。
+
+> Vercel の Project Settings に **Output Directory** が入っている場合は空（既定）に戻すこと。
+> `.vercel/output` があるときはそれが使われるが、設定が残っていると紛らわしい。
 
 ### ③ 動作確認
 

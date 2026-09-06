@@ -58,8 +58,9 @@ npm run gen:decks   # decks/*.txt を src/rules/decks.generated.ts に埋め込�
 | `src/net/store.ts` | 保存先の契約と `MemoryStore`。`store.redis.ts` が Upstash 実装 |
 | `src/net/route.version.ts` | 版番号だけ返す経路。**エンジンを import しない**（費用の一線） |
 | `src/net/routes.ts` | 盤面と操作の経路（Web標準の `Request` / `Response`） |
-| `api/*.ts` | Vercel Functions。中身は `src/net/` を呼ぶだけ |
-| `server/dev.ts` | ローカル対戦サーバ（`npm run serve`）。`api/` と同じ関数を叩く |
+| `server/functions/*.ts` | デプロイする関数の入口。中身は `src/net/` を呼ぶだけ（**リポジトリの根に `api/` を置かない**——Vercel が自前でビルドしてしまう） |
+| `server/dev.ts` | ローカル対戦サーバ（`npm run serve`）。同じ経路の関数を叩く |
+| `tools/build-vercel.ts` | 関数を1ファイルに束ねて `.vercel/output/` を作る（Build Output API） |
 | `src/browser/game.entry.tsx` | 対戦画面（React）。`board.tsx` が盤面、`net.ts` が通信とポーリング |
 | `tools/build-client.ts` | 対戦画面を1枚のHTMLに束ねる（`tools/client.template.ts` が枠と見た目） |
 | `src/engine/effects.ts` | 解決エンジン本体（`resolve(effect, ctx)`） |

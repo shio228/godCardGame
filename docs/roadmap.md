@@ -41,7 +41,7 @@ npm run serve       # 対戦サーバ（http://localhost:5173）。2人でもAI�
 | handler 3件 | 実装済み（`src/engine/handlers.ts`）。sweep の失敗は残り4枚＝プレイ条件未達だけ |
 | 視点別ビュー | **実装済み**（`src/engine/view.ts`）。隠された情報はホワイトリストで組み立てる |
 | 部屋・再生 | **実装済み**（`src/net/`）。対戦の実体は「選択の列」で、盤面は選択のたびに再生して作る |
-| HTTP の経路 | **実装済み**（`api/v.ts` / `api/state.ts` / `api/game.ts` + `server/dev.ts`） |
+| HTTP の経路 | **実装済み**（`server/functions/*.ts` を束ねて `.vercel/output/` へ + `server/dev.ts`） |
 | 対戦画面（React） | **実装済み**（`src/browser/`）。ロビー・盤面・選択バー・再接続・AI対戦・デッキ持ち込み |
 | 保存先 | メモリ（ローカル）と Upstash Redis（Vercel）。Postgres へは実装1本で移せる |
 

@@ -5,11 +5,11 @@
  * **呼び出し側の作法はホスティングによって違う**。
  *
  * - ローカルの `server/dev.ts` … `node:http` の `(req, res)`
- * - Vercel … Web標準の名前付き export（`GET` / `POST`）を見る場合と、
- *   従来どおり `export default (req, res)` を見る場合がある
+ * - Vercel … Build Output API の Node ランチャは `export default (req, res)` を呼ぶ。
+ *   Web標準の名前付き export（`GET` / `POST`）を見る構成もあるので両方出してある
  *
  * どちらで呼ばれても同じ経路に入るよう、変換をここ1か所に置く。
- * **ブラウザ用のバンドルには入らない**（`api/` と `server/` からしか import しない）。
+ * **ブラウザ用のバンドルには入らない**（`server/` からしか import しない）。
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
@@ -69,7 +69,7 @@ export async function sendResponse(res: ServerResponse, out: Response): Promise<
 
 /**
  * Web標準の経路を、従来の `(req, res)` ハンドラに包む。
- * `api/*.ts` の `export default` に使う（この形しか見ないホスティングのため）。
+ * `server/functions/*.ts` の `export default` に使う（この形しか見ないホスティングのため）。
  */
 export function nodeHandler(
   route: (request: Request) => Promise<Response>,

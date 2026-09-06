@@ -19,7 +19,6 @@
     "src/**/*.ts",
     "src/**/*.tsx",
     "tools/**/*.ts",
-    "api/**/*.ts",
     "server/**/*.ts"
   ]
 }

@@ -2,8 +2,8 @@
  * 盤面と操作の経路。HTTP をここで受け、中身は `RoomService` に渡すだけ。
  *
  * Web 標準の `Request` / `Response` で書いてあるので、
- * Vercel Functions でも `node:http` のローカルサーバでも、テストからの直接呼び出しでも
- * 同じものが動く（`server/dev.ts` と `api/` は、この関数を呼ぶだけの薄い層）。
+ * Vercel の関数でも `node:http` のローカルサーバでも、テストからの直接呼び出しでも
+ * 同じものが動く（`server/dev.ts` と `server/functions/` は、この関数を呼ぶだけの薄い層）。
  *
  * 版番号の経路だけは `route.version.ts` に分けてある（エンジンを載せないため）。
  */

@@ -175,15 +175,15 @@ describe('ポーリング経路の重さ', () => {
     return [...seen].map((f) => relative(ROOT, f).split('\\').join('/'));
   }
 
-  it('api/v.ts はエンジンにもカードデータにも辿り着かない', () => {
-    const files = reachable('api/v.ts');
+  it('版番号の入口はエンジンにもカードデータにも辿り着かない', () => {
+    const files = reachable('server/functions/v.ts');
     const heavy = files.filter((f) => f.startsWith('src/engine/') || f.startsWith('src/rules/'));
     assert.deepEqual(heavy, [], `版番号の経路が重いものを引き込んでいる: ${heavy.join(', ')}`);
     assert.ok(files.includes('src/net/route.version.ts'));
   });
 
-  it('操作の経路（api/game.ts）はエンジンを持っている', () => {
-    const files = reachable('api/game.ts');
+  it('操作の入口はエンジンを持っている', () => {
+    const files = reachable('server/functions/game.ts');
     assert.ok(
       files.some((f) => f.startsWith('src/engine/')),
       '再生するのだから当然エンジンが要る（対比のための確認）',

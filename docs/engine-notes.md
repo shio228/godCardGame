@@ -652,7 +652,7 @@ JSのコールスタック上にあって `GameState` には無いため、状�
 | `POST /api/game` | 選択を足して再生 | 回す |
 
 「今は呼んでいない」ではなく「そもそも import されていない」ところまでテストで見ている
-（`src/net/routes.test.ts` が `api/v.ts` から実行時に辿れるファイルを走査する）。
+（`src/net/routes.test.ts` が `server/functions/v.ts` から実行時に辿れるファイルを走査する）。
 
 ### 隠された情報は削るのではなく組み立てる
 
