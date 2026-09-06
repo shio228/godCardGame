@@ -253,6 +253,13 @@ export type Value =
        */
       measure: 'events' | 'units';
       by?: PlayerSel;
+      /**
+       * **誰に当たったか**で絞る（ダメージのイベントだけ）。
+       * 「あなたが10回目のダメージを与えたなら」のような**攻撃回数**の条件は、
+       * これを `opponent` にしないと**自傷まで数えてしまう**
+       * （ブレイジングラッシュの「カードをプレイするたび2点受ける」など）。
+       */
+      to?: PlayerSel;
       source?: StackSel;
       tags?: DamageTag[];
       weather?: Weather | Weather[];

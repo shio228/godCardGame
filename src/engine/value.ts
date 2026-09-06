@@ -13,6 +13,7 @@ import {
   resolveZonePiles,
   scopeItems,
 } from './select';
+import { entityOwner } from './state';
 import type { Bound, GameEvent } from './state';
 
 /** 束縛を数値として読む。集合なら要素数。 */
@@ -128,6 +129,7 @@ export async function evalValue(v: Value, ctx: Ctx): Promise<number> {
 
     case 'countEvent': {
       const by = v.by ? await resolvePlayerOne(v.by, ctx) : undefined;
+      const to = v.to ? await resolvePlayerOne(v.to, ctx) : undefined;
       const sourceUids = v.source ? (await resolveStack(v.source, ctx)).map((i) => i.uid) : undefined;
       let n = 0;
       for (const ev of s.events) {
@@ -135,6 +137,10 @@ export async function evalValue(v: Value, ctx: Ctx): Promise<number> {
         if (!inScope(ev, ctx, v.scope)) continue;
         // by は「そのイベントの主体」。受けた側/引いた本人/持ち主のこと。
         if (by && ev.player !== by) continue;
+        // to は「当たった相手」。自傷（与えた側＝受けた側）を除くのに使う
+        if (to !== undefined) {
+          if (!ev.entity || entityOwner(ev.entity) !== to) continue;
+        }
         if (sourceUids && (!ev.sourceUid || !sourceUids.includes(ev.sourceUid))) continue;
         if (v.tags && !v.tags.every((t) => ev.tags?.includes(t))) continue;
         if (v.weather) {

@@ -209,6 +209,31 @@ describe('大地', () => {
     );
     assert.equal(engine.state.winner, 'P1');
   });
+
+  it('十連撃の誓約 — 自傷は数えない（攻撃回数の条件なので）', async () => {
+    // ブレイジングラッシュの「カードをプレイするたび2点受ける」は自分が自分に与えるダメージ。
+    // これを数えると、スタックフェイズにカードを並べるだけで達成してしまう
+    const engine = setup('earth', 'sea', pick(earthTen, seaChant));
+    setupBoth(engine, 'earth', 'sea');
+    await startCycle(engine);
+
+    for (let i = 0; i < 12; i++) {
+      await resolveTop(
+        { t: 'damage', to: { t: 'player', who: { t: 'self' } }, amount: 2, tags: ['self'], flags: { ignoreCycleBonus: true } },
+        topCtx(engine, 'P1'),
+      );
+    }
+    assert.equal(engine.state.winner, undefined, '自傷12回では成立しない');
+
+    // 相手に当てたぶんだけ数える
+    for (let i = 0; i < 10; i++) {
+      await resolveTop(
+        { t: 'damage', to: { t: 'player', who: { t: 'opponent' } }, amount: 1, flags: { ignoreCycleBonus: true } },
+        topCtx(engine, 'P1'),
+      );
+    }
+    assert.equal(engine.state.winner, 'P1', '相手への10回で成立する');
+  });
 });
 
 describe('海', () => {
@@ -262,6 +287,31 @@ describe('海', () => {
     );
     assert.equal(item.counters.chant, 30);
     assert.equal(engine.state.winner, 'P1');
+  });
+
+  it('十連撃の誓約 — 自傷は数えない（攻撃回数の条件なので）', async () => {
+    // ブレイジングラッシュの「カードをプレイするたび2点受ける」は自分が自分に与えるダメージ。
+    // これを数えると、スタックフェイズにカードを並べるだけで達成してしまう
+    const engine = setup('earth', 'sea', pick(earthTen, seaChant));
+    setupBoth(engine, 'earth', 'sea');
+    await startCycle(engine);
+
+    for (let i = 0; i < 12; i++) {
+      await resolveTop(
+        { t: 'damage', to: { t: 'player', who: { t: 'self' } }, amount: 2, tags: ['self'], flags: { ignoreCycleBonus: true } },
+        topCtx(engine, 'P1'),
+      );
+    }
+    assert.equal(engine.state.winner, undefined, '自傷12回では成立しない');
+
+    // 相手に当てたぶんだけ数える
+    for (let i = 0; i < 10; i++) {
+      await resolveTop(
+        { t: 'damage', to: { t: 'player', who: { t: 'opponent' } }, amount: 1, flags: { ignoreCycleBonus: true } },
+        topCtx(engine, 'P1'),
+      );
+    }
+    assert.equal(engine.state.winner, 'P1', '相手への10回で成立する');
   });
 });
 
