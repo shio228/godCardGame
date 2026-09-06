@@ -13,7 +13,7 @@
     "deck": "node --import tsx tools/deck.ts",
     "play": "node --import tsx tools/play.ts",
     "serve": "node --import tsx server/dev.ts",
-    "build": "node --import tsx tools/build-client.ts",
+    "build": "node --import tsx tools/build-client.ts && node --import tsx tools/build-vercel.ts",
     "builder": "node --import tsx tools/deckbuilder.ts",
     "gen:decks": "node --import tsx tools/gen-decks.ts"
   },

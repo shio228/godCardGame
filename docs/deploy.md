@@ -57,14 +57,47 @@ room:<合言葉>:v    版番号だけ    ← ポーリングはこれしか読�
 2. Environment Variables に ① の2つを入れる（Production / Preview の両方）
 3. Deploy する
 
-設定は `vercel.json` に入っている（ビルドは `npm run build`、配信は `public/`、
-`api/*.ts` が関数になる）。**環境変数が無いまま Vercel で動かすと、部屋を作った直後に
-「無い」と言われる状態になる**ので、その場合はわざとエラーで止まるようにしてある。
+設定は `vercel.json` に入っている（ビルドは `npm run build` だけ）。
+**環境変数が無いまま Vercel で動かすと、部屋を作った直後に「無い」と言われる状態になる**ので、
+その場合はわざとエラーで止まるようにしてある。
+
+#### 成果物は自分で組み立てて渡している
+
+`npm run build` は `.vercel/output/`（Build Output API v3）を作る。
+
+```
+.vercel/output/
+  config.json                      経路（/api/* 以外は index.html へ）
+  static/index.html                対戦画面
+  functions/api/<name>.func/
+    .vc-config.json                ランタイム（nodejs22.x）
+    index.mjs                      esbuild で1ファイルに束ねた関数
+```
+
+**`api/*.ts` をそのまま置くとVercelはその1ファイルだけをJSに変換する。**
+このリポジトリは ESM なので Node は拡張子を補完せず、`../src/net/routes` が
+実行時に解決できずに関数が起動前に落ちる（`ERR_MODULE_NOT_FOUND` →
+ブラウザには `FUNCTION_INVOCATION_FAILED`）。実際に一度踏んだので、
+**束ねてから渡す**形にした。`tools/build-vercel.test.ts` が
+「束ねた結果に相対 import が残っていないこと」と
+「束ねたものを読み込んで実際に応答が返ること」を毎回確かめている。
 
 ### ③ 動作確認
 
+先に、経路が生きているかを直接見るのがはやい。
+
+| 開くURL | 期待 | 違ったら |
+|---|---|---|
+| `/api/ping` | `{"ok":true, ...}` | 関数の仕組み自体が動いていない（Vercel の Runtime Logs を見る） |
+| `/api/v?room=TEST` | `{"room":"TEST","version":null}` | `error` に理由が出る。環境変数の入れ忘れ・再デプロイ忘れが多い |
+
+そのうえで:
+
 1. 発行された URL を開いて「AI と対戦する」で部屋を作る → 数手打てること
 2. 別のブラウザ（or スマホ）で開いて、合言葉で入って2人対戦
+
+`api/ping.ts` は切り分け用の探針で、リージョンと Node の版、
+**環境変数が入っているかどうか（値は出さない）**だけを返す。要らなくなったら消してよい。
 
 ### あとで Vercel Postgres に移すとき
 
